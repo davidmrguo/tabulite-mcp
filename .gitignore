@@ -1,0 +1,47 @@
+# --- Data: nothing anyone imports or exports belongs in the repo ------------
+
+# Your CSV files stay on your machine. The two small sample files are the
+# only ones tracked, so the README's example workflow works after a clone.
+source/*
+!source/sales.csv
+!source/customers.csv
+
+# The workspace is entirely generated: imported databases, the catalog and
+# exported results. Only the empty directory markers are tracked.
+workspace/*
+!workspace/databases/
+!workspace/exports/
+workspace/databases/*
+workspace/exports/*
+!workspace/databases/.gitkeep
+!workspace/exports/.gitkeep
+
+# SQLite databases and their journals, wherever they end up.
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+
+# --- Python ----------------------------------------------------------------
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- Editors and OS --------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+*.swp

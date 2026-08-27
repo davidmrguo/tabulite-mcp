@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tabulite-mcp"
+dynamic = ["version"]   # single source: src/tabulite_mcp/__init__.py
+description = "Local MCP server that imports large CSV files into SQLite and exposes safe read-only SQL to a desktop AI client"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "David Guo" }]
+keywords = ["mcp", "model-context-protocol", "sqlite", "csv", "data-analysis", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+    # The official Python MCP SDK, pinned: this server targets the v2 API
+    # (MCPServer, host/port on run()) and does not use v1 FastMCP patterns.
+    "mcp==2.1.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/davidmrguo/tabulite-mcp"
+Repository = "https://github.com/davidmrguo/tabulite-mcp"
+Issues = "https://github.com/davidmrguo/tabulite-mcp/issues"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+tabulite-mcp = "tabulite_mcp.server:main"
+
+[tool.hatch.version]
+path = "src/tabulite_mcp/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tabulite_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]   # "." so tests can import shared fixtures via tests.conftest
+addopts = "-q"

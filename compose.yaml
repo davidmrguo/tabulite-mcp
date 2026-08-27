@@ -1,0 +1,27 @@
+services:
+  tabulite-mcp:
+    build: .
+    container_name: tabulite-mcp
+    ports:
+      # Published on localhost only: this server has no authentication and is
+      # meant for a desktop AI client running on the same machine.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Large CSV files stay here, read-only. They are never uploaded to the AI.
+      - ./source:/project/source:ro
+      # Imported SQLite databases, the catalog and exported results.
+      - ./workspace:/project/workspace
+    environment:
+      TABULITE_SOURCE_DIR: /project/source
+      TABULITE_WORKSPACE_DIR: /project/workspace
+      TABULITE_HOST: 0.0.0.0
+      TABULITE_PORT: "8000"
+      # Values converted to SQL NULL during import (empty item = empty string).
+      TABULITE_NULL_MARKERS: ",NULL,null,N/A,NA"
+      # Interactive result cap; export_query() is deliberately unbounded.
+      TABULITE_MAX_QUERY_ROWS: "1000"
+      TABULITE_QUERY_TIMEOUT: "30"
+      TABULITE_EXPORT_TIMEOUT: "600"
+    # On Linux, uncomment so files written into ./workspace belong to you:
+    # user: "${UID:-1000}:${GID:-1000}"
+    restart: unless-stopped
