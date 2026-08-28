@@ -2,7 +2,7 @@
 
 ## The short version
 
-Be decent to people. Assume good faith. Criticise code, not the person who
+Be decent to people. Assume good faith. Criticize code, not the person who
 wrote it.
 
 ## Standards
@@ -17,7 +17,7 @@ Things that make this project work:
 Things that are not acceptable:
 
 - Harassment, insults, or personal or political attacks
-- Sexualised language or imagery, or unwelcome sexual attention
+- Sexualized language or imagery, or unwelcome sexual attention
 - Publishing others' private information without explicit permission
 - Sustained disruption of discussions, or deliberately derailing threads
 - Any other conduct that would reasonably be considered inappropriate in a
@@ -31,7 +31,7 @@ messages, code review — and when representing the project publicly elsewhere.
 ## Enforcement
 
 Maintainers are responsible for clarifying these standards and will take fair
-corrective action in response to behaviour they consider inappropriate. That may
+corrective action in response to behavior they consider inappropriate. That may
 include editing or removing comments, commits, issues or pull requests, and
 temporarily or permanently banning a contributor.
 
