@@ -1,0 +1,44 @@
+name: Feature request
+description: Suggest something that fits the project's scope
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please read the **Scope** section of
+        [CONTRIBUTING.md](https://github.com/davidmrguo/tabulite-mcp/blob/main/CONTRIBUTING.md)
+        first. This project is deliberately narrow, and several common requests
+        are permanently out of scope — an embedded LLM, NL-to-SQL in the server,
+        pandas/Polars/DuckDB, Excel or Parquet, vector search, cloud deployment,
+        authentication, and domain-specific tools.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the situation, not the solution you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What did you try instead?
+      description: >
+        Since the assistant writes arbitrary SQL, many requests are already
+        achievable with `query_sql()`. What did you try, and where did it fall short?
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: I have read the Scope section of CONTRIBUTING.md and believe this fits.
+          required: true
