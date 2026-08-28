@@ -35,7 +35,7 @@ Repository = "https://github.com/davidmrguo/tabulite-mcp"
 Issues = "https://github.com/davidmrguo/tabulite-mcp/issues"
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.14"]
 
 [project.scripts]
 tabulite-mcp = "tabulite_mcp.server:main"
@@ -50,3 +50,14 @@ packages = ["src/tabulite_mcp"]
 testpaths = ["tests"]
 pythonpath = ["src", "."]   # "." so tests can import shared fixtures via tests.conftest
 addopts = "-q"
+
+[tool.ruff]
+# Matches the code as written; the longest existing line is 113 characters.
+line-length = 120
+
+[tool.ruff.lint]
+# Ruff's default rules: pyflakes (real defects - undefined names, unused
+# imports, broken f-strings) plus the pycodestyle errors. Deliberately not the
+# opinionated style families (import sorting, pyupgrade, flake8-bugbear); those
+# are a separate decision from turning CI on, and would rewrite most of the tree.
+select = ["E", "F"]
