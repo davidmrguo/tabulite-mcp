@@ -35,10 +35,12 @@ corrective action in response to behaviour they consider inappropriate. That may
 include editing or removing comments, commits, issues or pull requests, and
 temporarily or permanently banning a contributor.
 
-To report a concern, contact the maintainer directly — the contact address on
-[@davidmrguo's GitHub profile](https://github.com/davidmrguo), or a direct
-message. Reports are handled privately, and the reporter's identity will not be
-shared with the person reported without the reporter's consent.
+To report a concern, open a
+[private report](https://github.com/davidmrguo/tabulite-mcp/security/advisories/new)
+and mark it as a conduct issue rather than a vulnerability. That channel is
+private to the maintainer, which is why it is used here — it is not a
+security-only inbox. Reports are handled privately, and the reporter's identity
+will not be shared with the person reported without the reporter's consent.
 
 Because this project currently has a single maintainer, there is no separate
 appeals body. If your concern is about the maintainer's own conduct and you

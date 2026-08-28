@@ -1,5 +1,9 @@
 # Tabulite MCP
 
+[![CI](https://github.com/davidmrguo/tabulite-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/davidmrguo/tabulite-mcp/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 **Analyze CSV files that are too big for a spreadsheet — and too big to paste
 into a chat — by giving your AI assistant a local SQLite runtime instead of the
 data.**
@@ -432,11 +436,28 @@ embeddings or vector search, no cloud deployment, authentication, multi-user
 support or background jobs. Your AI client is already the interface and the
 reasoning layer.
 
+## Contributing
+
+Bug reports, questions and pull requests are all welcome.
+
+- **Something broken?** [Open an issue](https://github.com/davidmrguo/tabulite-mcp/issues/new/choose).
+- **A question, or an idea you want to talk through?**
+  [Discussions](https://github.com/davidmrguo/tabulite-mcp/discussions) is the
+  place for anything open-ended.
+- **Want to send code?** Read [CONTRIBUTING.md](CONTRIBUTING.md) first —
+  especially the scope section, which will tell you quickly whether an idea
+  fits before you write it.
+- **Found a security problem?** Please don't open a public issue.
+  [SECURITY.md](SECURITY.md) explains how to report it privately.
+
+Everyone taking part is expected to follow the
+[Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## License
 
 [MIT](LICENSE) — do what you like with it, keep the notice.
 
-Contributions are welcome and are accepted under the same license (no CLA, no
+Contributions are accepted under the same license (no CLA, no
 copyright assignment). Copyright stays with the people who wrote the code,
 which is deliberate: this is meant to stay an open source project rather than
 become someone's product.

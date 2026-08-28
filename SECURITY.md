@@ -10,8 +10,10 @@ Report it privately through GitHub's
 That opens a private advisory visible only to the maintainers, where a fix can be
 prepared before anything is public.
 
-If you have no GitHub account, the maintainer's contact address on their GitHub
-profile is fine.
+Private reporting needs a GitHub account, which is free to create. If that is
+genuinely not an option for you, open a public issue saying only that you have a
+security report and would like a private channel — with no technical detail —
+and one will be arranged.
 
 Expect an initial response within about a week. This is a small project
 maintained in spare time, so please allow reasonable time for a fix before
