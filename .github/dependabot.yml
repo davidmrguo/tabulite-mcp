@@ -1,0 +1,35 @@
+version: 2
+
+updates:
+  # Grouped into a single PR per ecosystem on purpose. The branch ruleset
+  # requires an up-to-date branch and a fresh approval, and auto-merge is off,
+  # so every additional open PR costs a rebase, a CI run and a re-approval once
+  # any sibling merges. One grouped PR a week keeps that cost flat.
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      python:
+        patterns: ["*"]
+    ignore:
+      # The mcp pin is deliberate: the server targets the v2 API (MCPServer,
+      # host/port on run()). A major bump needs a code change, not a version
+      # bump, so it is handled by hand. Dependabot *alerts* still fire for mcp
+      # regardless of this rule; only the automatic PR is suppressed.
+      - dependency-name: "mcp"
+        update-types: ["version-update:semver-major"]
+
+  # Keeps actions/checkout and actions/setup-python current. Stale action
+  # versions are the commonly missed half of supply-chain drift.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ["*"]
