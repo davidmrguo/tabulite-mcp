@@ -122,6 +122,7 @@ committed and the server can never modify them. Everything Tabulite creates
 | `sample_table(table_name, limit=20)` | a few rows, to see what the data looks like |
 | `query_sql(sql)` | read-only analytical SQL (capped at 1,000 rows) |
 | `export_query(sql, file_name?, format="csv")` | complete result streamed to a file |
+| `delete_table(table_name, confirm?, confirmation_token?)` | permanently remove an imported table — two-step, see below |
 
 Notably absent: anything domain-specific. There is no `top_products()` or
 `calculate_revenue()`. Your assistant writes the SQL, which is the whole point —
@@ -258,6 +259,32 @@ path — this is the real result on the bundled sample data:
 Neither the server nor the conversation ever holds the whole result, so this
 works the same way at 58 rows or 5 million.
 
+### Deleting a table
+
+Imports are cheap to redo but expensive to lose, so `delete_table()` is
+deliberately two-step. Ask your assistant to delete a table and the first call
+deletes nothing — it returns a warning saying exactly what would go (row count,
+columns, profiles) and, importantly, whether the original CSV is still in
+`source/` to re-import from:
+
+> This will permanently delete the table 'sales' (500 rows, 7 columns) along
+> with its column profiles and its entry in the catalog. The source file
+> sales.csv is still in source/, so the table could be rebuilt with
+> import_source() afterwards.
+
+**You then have to type `DELETE` in capitals.** Nothing else counts — not
+"yes", not "go ahead", not lowercase "delete". Your assistant passes that word
+back along with a single-use token from the warning, and only then is the table
+dropped, its profiles and catalog entry removed, and the database compacted so
+the disk space actually comes back.
+
+The two-step design is enforced by the server, not by the model's good
+manners: no single call can delete anything, because the token only exists
+once a warning has been issued. What a server cannot verify is that a human
+typed the word rather than the model — so treat the warning in your chat as
+the real checkpoint. Your CSV in `source/` and anything already written to
+`workspace/exports/` are never touched.
+
 ---
 
 ## Safety
@@ -325,6 +352,7 @@ tabulite-mcp/
 ├── src/tabulite_mcp/
 │   ├── server.py            # the MCP tools
 │   ├── config.py            # paths and limits
+│   ├── confirm.py           # two-step confirmation for destructive tools
 │   ├── security.py          # path containment + read-only enforcement
 │   ├── database.py          # connections, row caps, cancellation
 │   ├── importer.py          # streaming CSV → SQLite
@@ -355,13 +383,14 @@ Run the tests:
 pytest
 ```
 
-211 tests cover source discovery and traversal rejection, streamed import, NULL
+232 tests cover source discovery and traversal rejection, streamed import, NULL
 vs invalid handling, SHA-256 identity (including renamed and modified files),
 deterministic table naming, profiling and type inference, the `TRY_*` functions,
 `AVG` ignoring invalid values, SELECT/GROUP BY/CTE/join/window queries, result
 limits, query cancellation, read-only enforcement at both the scrubber and
 authorizer layers, CSV and JSON export, export streaming, filename sanitization,
-and tool invocation over a real in-process MCP session.
+the two-step delete confirmation, and tool invocation over a real in-process
+MCP session.
 
 **Stack:** Python 3.11+, the standard library's `sqlite3`, and the official MCP
 Python SDK pinned at `mcp==2.1.1` (v2 API: `MCPServer`, host/port on `run()`).

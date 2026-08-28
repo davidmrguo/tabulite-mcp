@@ -183,8 +183,24 @@ def list_imports(conn: sqlite3.Connection) -> list[dict[str, Any]]:
 
 
 def delete_import(conn: sqlite3.Connection, table_name: str) -> None:
+    """Forget an import and the column profiles that belong to it."""
     conn.execute("DELETE FROM imports WHERE table_name = ?", (table_name,))
     conn.execute("DELETE FROM column_profiles WHERE table_name = ?", (table_name,))
+
+
+def count_imports_for_source(conn: sqlite3.Connection, source_id: str) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) FROM imports WHERE source_id = ?", (source_id,)
+    ).fetchone()
+    return int(row[0])
+
+
+def delete_source_if_unreferenced(conn: sqlite3.Connection, source_id: str) -> bool:
+    """Drop a source row once no import points at it. Returns True if removed."""
+    if count_imports_for_source(conn, source_id):
+        return False
+    conn.execute("DELETE FROM sources WHERE source_id = ?", (source_id,))
+    return True
 
 
 # --------------------------------------------------------------------------

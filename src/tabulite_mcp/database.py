@@ -134,6 +134,43 @@ def row_count(conn: sqlite3.Connection, table_name: str) -> int:
     return int(conn.execute(f"SELECT COUNT(*) FROM {quote(table_name)}").fetchone()[0])
 
 
+def drop_table(conn: sqlite3.Connection, table_name: str) -> None:
+    """Remove a table and its data from the database."""
+    conn.execute(f"DROP TABLE IF EXISTS {quote(table_name)}")
+
+
+def checkpoint_wal(conn: sqlite3.Connection) -> None:
+    """Fold the write-ahead log back into the main database file.
+
+    Sizes read while a WAL is outstanding are misleading, so checkpoint before
+    measuring.
+    """
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+
+def vacuum(conn: sqlite3.Connection) -> None:
+    """Rebuild the database file so freed pages are returned to the OS.
+
+    Dropping a table leaves its pages on the free list; only VACUUM shrinks
+    the file on disk, which is half the point of deleting a table.
+    """
+    checkpoint_wal(conn)
+    conn.execute("VACUUM")
+
+
+def database_size_bytes(path: Path) -> int:
+    """Size of the database file plus its write-ahead log, if present.
+
+    Read this after closing the connection (or after a checkpoint) for a
+    number that matches what the user sees on disk.
+    """
+    total = 0
+    for candidate in (path, path.with_name(path.name + "-wal")):
+        if candidate.exists():
+            total += candidate.stat().st_size
+    return total
+
+
 def execute_query(
     conn: sqlite3.Connection,
     sql: str,

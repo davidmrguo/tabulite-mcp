@@ -11,16 +11,20 @@ from __future__ import annotations
 import contextlib
 import logging
 import sqlite3
+import time
+from datetime import datetime, timezone
 from typing import Any, Iterator
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import ToolAnnotations
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from . import __version__, catalog, database, exporter, importer, profiler
 from .config import Config
+from .confirm import CONFIRMATION_WORD, ConfirmationError, ConfirmationRegistry
 from .database import QueryTimeout
 from .security import SecurityError, resolve_source_path, validate_read_only_sql
 
@@ -29,6 +33,10 @@ logger = logging.getLogger("tabulite_mcp")
 CONFIG = Config.from_env()
 
 SOURCE_SUFFIXES = {".csv", ".tsv"}
+
+# Pending destructive actions, keyed by single-use token. Process-local: a
+# restart cancels anything awaiting confirmation.
+CONFIRMATIONS = ConfirmationRegistry()
 
 INSTRUCTIONS = """\
 A local SQLite runtime sitting next to large CSV files.
@@ -43,6 +51,10 @@ zeros ordinary CAST() produces, so AVG()/SUM() skip them. Check denominators
 with COUNT(TRY_REAL(col)) against COUNT(*) when a number matters.
 
 Aggregate inside SQLite rather than pulling raw rows: query_sql is row-capped.
+
+delete_table is destructive and deliberately two-step: call it once to get a
+warning, show that warning to the user, and only call it again once the user
+has typed DELETE themselves.
 """
 
 server = MCPServer(
@@ -398,6 +410,145 @@ def export_query(sql: str, file_name: str | None = None, format: str = "csv") ->
             raise _fail(exc) from exc
         except sqlite3.DatabaseError as exc:
             raise ToolError(f"SQL error: {exc}") from exc
+
+
+@server.tool(
+    annotations=ToolAnnotations(
+        read_only_hint=False, destructive_hint=True, idempotent_hint=False
+    )
+)
+def delete_table(
+    table_name: str,
+    confirm: str | None = None,
+    confirmation_token: str | None = None,
+) -> dict[str, Any]:
+    """Permanently delete an imported table, its profile and its catalog record.
+
+    Use when an import went wrong and the user wants to start over, or when
+    they are finished and want the disk space back. The table, its column
+    profiles and its import record are removed and the database file is
+    compacted. The CSV in source/ is never touched, and files already written
+    to workspace/exports/ are left alone.
+
+    THIS TOOL IS TWO-STEP AND YOU MUST NOT SHORT-CIRCUIT IT.
+
+    Step 1 - call with table_name only. Nothing is deleted. You get back a
+    warning describing exactly what would be lost and a confirmation_token.
+    Show the user that warning, including whether the source CSV is still
+    available to re-import from, and ask them to reply with DELETE in capitals.
+
+    Step 2 - only after the user has themselves typed DELETE, call again with
+    confirm="DELETE" and the confirmation_token from step 1.
+
+    Never invent the confirmation on the user's behalf, never pass confirm on
+    a first call, and never treat "yes", "go ahead" or "delete it" as the
+    confirmation - ask them for the exact word. If they decline or say
+    anything else, simply do not call this tool again.
+    """
+    with _writable() as (db, cat):
+        _require_table(db, table_name)
+        record = catalog.get_import(cat, table_name)
+        source_id = record["source_id"] if record else None
+        source = catalog.get_source(cat, source_id) if source_id else None
+        rows = database.row_count(db, table_name)
+        columns = [name for name, _ in database.table_columns(db, table_name)]
+        profiles = catalog.get_column_profiles(cat, table_name)
+
+        source_path = source["relative_path"] if source else None
+        source_present = bool(
+            source_path and (CONFIG.source_dir / source_path).is_file()
+        )
+
+        # ---- Step 1: warn, and hand back a single-use token ----------------
+        if confirm is None and confirmation_token is None:
+            token, expires_at = CONFIRMATIONS.issue("delete_table", table_name)
+            if source_present:
+                recovery = (
+                    f"The source file {source_path} is still in source/, so the table "
+                    "could be rebuilt with import_source() afterwards."
+                )
+            else:
+                recovery = (
+                    "WARNING: the source CSV is NOT in source/ any more, so this table "
+                    "CANNOT be re-imported. Deleting it destroys the only copy of this "
+                    "data held by this server."
+                )
+            return {
+                "status": "confirmation_required",
+                "table_name": table_name,
+                "warning": (
+                    f"This will permanently delete the table '{table_name}' "
+                    f"({rows:,} rows, {len(columns)} columns) along with its column "
+                    f"profiles and its entry in the catalog. {recovery}"
+                ),
+                "will_delete": {
+                    "table": table_name,
+                    "rows": rows,
+                    "columns": columns,
+                    "column_profiles": len(profiles),
+                    "catalog_import_record": record is not None,
+                },
+                "will_keep": [
+                    "the original CSV in source/",
+                    "any files already written to workspace/exports/",
+                ],
+                "source_file": {
+                    "relative_path": source_path,
+                    "present": source_present,
+                    "re_importable": source_present,
+                },
+                "confirmation_token": token,
+                "expires_at": datetime.fromtimestamp(expires_at, timezone.utc)
+                .isoformat(timespec="seconds"),
+                "next_step": (
+                    f"Show the warning to the user and ask them to reply with "
+                    f"{CONFIRMATION_WORD} in capitals. Only if they do, call "
+                    f"delete_table(table_name={table_name!r}, "
+                    f"confirm=\"{CONFIRMATION_WORD}\", "
+                    f"confirmation_token={token!r})."
+                ),
+            }
+
+        # ---- Step 2: verify the confirmation, then delete ------------------
+        try:
+            CONFIRMATIONS.consume(confirmation_token, "delete_table", table_name, confirm)
+        except ConfirmationError as exc:
+            raise _fail(exc) from exc
+
+        started = time.monotonic()
+        # Fold in the WAL first: a size read with one outstanding is meaningless.
+        database.checkpoint_wal(db)
+        size_before = database.database_size_bytes(CONFIG.database_path)
+
+        database.drop_table(db, table_name)
+        catalog.delete_import(cat, table_name)
+        source_removed = (
+            catalog.delete_source_if_unreferenced(cat, source_id) if source_id else False
+        )
+        database.vacuum(db)
+
+    # Measured after the connection closes, so it matches the file on disk.
+    size_after = database.database_size_bytes(CONFIG.database_path)
+
+    logger.info("deleted table %s (%s rows) after user confirmation", table_name, rows)
+    return {
+        "status": "deleted",
+        "table_name": table_name,
+        "rows_deleted": rows,
+        "column_profiles_deleted": len(profiles),
+        "catalog_source_record_removed": source_removed,
+        "database_bytes_before": size_before,
+        "database_bytes_after": size_after,
+        "bytes_freed": max(0, size_before - size_after),
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+        "source_file_kept": source_path,
+        "note": (
+            "The table and its profiles are gone and the database has been compacted. "
+            "The CSV in source/ and any previous exports were not touched."
+            + ("" if source_present else " The source CSV is no longer present, so this"
+               " data cannot be re-imported.")
+        ),
+    }
 
 
 # --------------------------------------------------------------------------
