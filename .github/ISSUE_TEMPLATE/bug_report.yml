@@ -1,0 +1,77 @@
+name: Bug report
+description: Something behaves differently than documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not report security vulnerabilities here — use
+        [private reporting](https://github.com/davidmrguo/tabulite-mcp/security/advisories/new).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Which tool call, with which arguments. Include the SQL if a query is involved.
+      placeholder: |
+        1. import_source("sales.csv")
+        2. query_sql("SELECT ...")
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: how-run
+    attributes:
+      label: How are you running it?
+      options:
+        - Docker / compose
+        - Local install (pip install -e .)
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      description: "`python --version`. Leave blank if running under Docker."
+      placeholder: "3.12.2"
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "macOS 15.2 / Ubuntu 24.04 / Windows 11"
+    validations:
+      required: true
+
+  - type: input
+    id: client
+    attributes:
+      label: AI client
+      placeholder: "Claude Desktop 1.4.0"
+
+  - type: textarea
+    id: data-shape
+    attributes:
+      label: Data shape
+      description: >
+        If a CSV is involved: roughly how large, how many columns, anything unusual
+        about delimiters, encoding or missing values. Please do not attach data you
+        cannot share publicly.
+      placeholder: "~40 MB, 600k rows, 12 columns, semicolon-delimited, empty strings for missing"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error output
+      description: Any traceback or error message. Automatically rendered as code.
+      render: shell

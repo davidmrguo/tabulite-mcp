@@ -1,0 +1,15 @@
+# Auto-requests review from the maintainer. Advisory rather than blocking:
+# the branch ruleset does not set require_code_owner_review, so this assigns
+# a reviewer without adding a merge gate.
+
+*                               @davidmrguo
+
+# The read-only guarantee, path containment and the delete gate. Changes here
+# get a closer read; see CONTRIBUTING.md, "Security-sensitive areas".
+/src/tabulite_mcp/security.py   @davidmrguo
+/src/tabulite_mcp/database.py   @davidmrguo
+/src/tabulite_mcp/confirm.py    @davidmrguo
+/src/tabulite_mcp/config.py     @davidmrguo
+
+# CI, rulesets and supply-chain configuration.
+/.github/                       @davidmrguo
