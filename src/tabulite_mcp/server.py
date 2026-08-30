@@ -26,6 +26,7 @@ from . import __version__, catalog, database, exporter, importer, profiler
 from .config import Config
 from .confirm import CONFIRMATION_WORD, ConfirmationError, ConfirmationRegistry
 from .database import QueryTimeout
+from .results import QueryResultError, QueryResultRegistry
 from .security import SecurityError, resolve_source_path, validate_read_only_sql
 
 logger = logging.getLogger("tabulite_mcp")
@@ -37,6 +38,10 @@ SOURCE_SUFFIXES = {".csv", ".tsv"}
 # Pending destructive actions, keyed by single-use token. Process-local: a
 # restart cancels anything awaiting confirmation.
 CONFIRMATIONS = ConfirmationRegistry()
+
+# Shapes of recent query results, so visualize_data() can name one. Rows are
+# never stored here — the client already has them.
+QUERY_RESULTS = QueryResultRegistry()
 
 INSTRUCTIONS = """\
 A local SQLite runtime sitting next to large CSV files.
@@ -51,6 +56,13 @@ zeros ordinary CAST() produces, so AVG()/SUM() skip them. Check denominators
 with COUNT(TRY_REAL(col)) against COUNT(*) when a number matters.
 
 Aggregate inside SQLite rather than pulling raw rows: query_sql is row-capped.
+
+query_sql returns a query_result_id. Pass it to visualize_data when a chart
+would help; rendering happens in your client, not here. Anything you present
+as this project's data has to come from a query result, never from numbers you
+remember or assume. What the user explicitly asks you to draw from scratch is
+their call — it just doesn't go through this tool or get labeled as data from
+here.
 
 delete_table is destructive and deliberately two-step: call it once to get a
 warning, show that warning to the user, and only call it again once the user
@@ -365,6 +377,9 @@ def query_sql(sql: str) -> dict[str, Any]:
     Wrap TEXT columns in TRY_REAL / TRY_INTEGER / TRY_DATE / TRY_DATETIME /
     TRY_BOOLEAN for safe conversion. Results are capped; when `truncated` is
     true, aggregate further in SQL or use export_query() instead.
+
+    The returned query_result_id names this result. Pass it to visualize_data()
+    if the user would be better served by a chart than by a table of numbers.
     """
     try:
         statement = validate_read_only_sql(sql)
@@ -380,6 +395,8 @@ def query_sql(sql: str) -> dict[str, Any]:
             raise _fail(exc) from exc
         except sqlite3.DatabaseError as exc:
             raise ToolError(f"SQL error: {exc}") from exc
+
+    result["query_result_id"] = QUERY_RESULTS.record(statement, result)
     return result
 
 
@@ -410,6 +427,84 @@ def export_query(sql: str, file_name: str | None = None, format: str = "csv") ->
             raise _fail(exc) from exc
         except sqlite3.DatabaseError as exc:
             raise ToolError(f"SQL error: {exc}") from exc
+
+
+@server.tool()
+def visualize_data(query_result_id: str, intent: str | None = None) -> dict[str, Any]:
+    """Visualize a query result you already have, using your own rendering.
+
+    Tabulite does not draw anything. This tool hands back a rendering brief for
+    one specific result so you can display it with whatever native
+    visualization your client already supports.
+
+    Use ONLY the rows that query_sql() returned under this query_result_id as
+    the source data. Prefer the simplest visualization that answers the
+    question — a bar chart, line chart, scatter plot or plain table.
+
+    Every chart of this project's data must come from a query result. Do not
+    chart numbers you remember, inferred from a profile, or read out of a
+    sample — run query_sql() and visualize what it returns. (If the user asks
+    you outright to draw something of their own, that is between you and them;
+    it simply is not what this tool is for.)
+
+    Do not query additional data, do not inspect the full underlying table, do
+    not build a dashboard and do not create a custom browser application unless
+    the user explicitly asks for one. If the result is genuinely the wrong
+    shape for a chart, run one more query_sql() to reshape it and visualize
+    that result instead — do not pull extra columns or rows merely to make the
+    picture more elaborate.
+
+    Pass `intent` to record what the user actually asked to see ("revenue by
+    month", "compare channels"); it does not change what is rendered, it only
+    keeps the goal attached to the result.
+    """
+    try:
+        ref = QUERY_RESULTS.get(query_result_id)
+    except QueryResultError as exc:
+        raise _fail(exc) from exc
+
+    # An empty result is the one place inside this path where a model is
+    # tempted to fill in plausible numbers. Fail rather than green-light it.
+    if ref.returned_rows == 0:
+        raise ToolError(
+            f"{ref.result_id} returned no rows, so there is nothing to visualize. "
+            "Tell the user the query found no data — do not put remembered or "
+            "assumed values in its place. If you expected rows, fix the query "
+            "with query_sql() and visualize the result of that instead"
+        )
+
+    guidance = [
+        "Render this in the client. Tabulite returns no image, chart spec or HTML.",
+        f"Use only the {ref.returned_rows} row(s) already returned for "
+        f"{ref.result_id}; do not re-query to enlarge or embellish the picture.",
+        "Choose a simple, appropriate form: bar, line, scatter or table. Infer the "
+        "axes, series and grouping from the columns and the user's intent.",
+        "No dashboard, no standalone HTML app, no custom browser UI unless the user "
+        "explicitly asked for one.",
+    ]
+    if ref.truncated:
+        guidance.append(
+            f"This result hit the {ref.row_limit}-row cap, so it is a partial view — "
+            "say so alongside the visualization rather than fetching more rows."
+        )
+
+    return {
+        "status": "render_in_client",
+        "renderer": "ai_client",
+        "query_result_id": ref.result_id,
+        "intent": intent,
+        "source_result": {
+            "produced_by": ref.tool,
+            "sql": ref.sql,
+            "columns": list(ref.columns),
+            "returned_rows": ref.returned_rows,
+            "truncated": ref.truncated,
+            "row_limit": ref.row_limit,
+            "created_at": datetime.fromtimestamp(ref.created_at, timezone.utc)
+            .isoformat(timespec="seconds"),
+        },
+        "guidance": guidance,
+    }
 
 
 @server.tool(

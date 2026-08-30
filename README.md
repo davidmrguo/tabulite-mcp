@@ -124,8 +124,9 @@ committed and the server can never modify them. Everything Tabulite creates
 | `profile_table(table_name, refresh?)` | compact profile of every column |
 | `profile_column(table_name, column_name)` | full detail for one column, with examples |
 | `sample_table(table_name, limit=20)` | a few rows, to see what the data looks like |
-| `query_sql(sql)` | read-only analytical SQL (capped at 1,000 rows) |
+| `query_sql(sql)` | read-only analytical SQL (capped at 1,000 rows), with a `query_result_id` |
 | `export_query(sql, file_name?, format="csv")` | complete result streamed to a file |
+| `visualize_data(query_result_id, intent?)` | ask the AI client to chart a result it already has — see below |
 | `delete_table(table_name, confirm?, confirmation_token?)` | permanently remove an imported table — two-step, see below |
 
 Notably absent: anything domain-specific. There is no `top_products()` or
@@ -263,6 +264,76 @@ path — this is the real result on the bundled sample data:
 Neither the server nor the conversation ever holds the whole result, so this
 works the same way at 58 rows or 5 million.
 
+### Charts are the client's job, not Tabulite's
+
+Tabulite renders nothing. There is no plotting library in here, no chart image,
+no HTML, no spec — and `visualize_data()` does not change that. It is a
+*semantic affordance*: a way for your assistant to notice that a result would
+read better as a picture, and to be told which result and what not to do about
+it.
+
+`query_sql()` now returns a `query_result_id` alongside the rows:
+
+```json
+{"columns": ["month", "revenue"], "rows": [["2025-01", 125.4], ...],
+ "returned_rows": 12, "truncated": false, "query_result_id": "qr_9f3c1ab2"}
+```
+
+Pass that id back and you get a rendering brief, not a rendering:
+
+```json
+{"status": "render_in_client", "renderer": "ai_client",
+ "query_result_id": "qr_9f3c1ab2", "intent": "revenue trend by month",
+ "source_result": {"produced_by": "query_sql", "columns": ["month", "revenue"],
+                   "returned_rows": 12, "truncated": false, "sql": "SELECT ..."},
+ "guidance": ["Render this in the client...", "...do not re-query...", ...]}
+```
+
+Your client then draws the chart with whatever it already supports. The
+guidance exists to keep that step small and honest:
+
+- **only the rows already returned** for that id are the source data — not the
+  table behind them, and not a second, wider query run to make the picture
+  richer;
+- **the simplest form that answers the question** — bar, line, scatter or a
+  plain table. Which columns become axes or series is inferred by the model
+  from the result and what you asked for, which is why this tool has no `x`,
+  `y`, `chart_type` or `color` arguments to get wrong;
+- **no dashboards and no standalone browser apps** unless you explicitly ask
+  for one;
+- if the result hit the 1,000-row cap, the brief says so and asks the client to
+  label the chart as a partial view rather than fetching more rows.
+
+The server keeps only the *shape* of recent results — the SQL, the column
+names, the row count — never the rows themselves; your client is already
+holding those. Those references are in-memory and bounded to the 32 most
+recent, so an id from a much earlier point in a long session, or from before a
+restart, comes back as a clear error telling the assistant to re-run the query
+rather than silently charting the wrong data.
+
+**No chart without a query.** A `query_result_id` is minted in exactly one
+place — inside `query_sql()`, after the SQL has passed validation and actually
+run. Nothing else issues one: not `sample_table()`, not `export_query()`, not a
+profile, and not a query that errored or was rejected as unsafe. Ids are not
+guessable, and `visualize_data()` has no "use the latest result" fallback, so
+the tool cannot return a rendering brief unless a real query produced a real
+result first. An empty result is refused outright rather than green-lit, since
+that is the one spot where a model might otherwise reach for plausible-looking
+numbers.
+
+What that does *not* do is stop a client from drawing a chart without calling
+this tool at all — from a `sample_table()` peek, from a profile, or from
+numbers it remembers. No MCP server can prevent that; it has no say in what the
+client renders. So the guarantee is the same shape as the one on
+`delete_table()`: the sanctioned path is airtight and cheap to follow, and
+skipping it is conspicuous. Past that boundary the tool description and the
+server instructions do the work, and what they ask for is narrow on purpose —
+anything presented *as this project's data* comes from a query result. If you
+ask your assistant outright to sketch something, chart figures you typed in
+yourself, or draw a diagram, that is between you and it. Tabulite has no
+business policing what you asked for; it only refuses to dress up invented
+numbers as an answer from your data.
+
 ### Deleting a table
 
 Imports are cheap to redo but expensive to lose, so `delete_table()` is
@@ -357,6 +428,7 @@ tabulite-mcp/
 │   ├── server.py            # the MCP tools
 │   ├── config.py            # paths and limits
 │   ├── confirm.py           # two-step confirmation for destructive tools
+│   ├── results.py           # references to recent query results
 │   ├── security.py          # path containment + read-only enforcement
 │   ├── database.py          # connections, row caps, cancellation
 │   ├── importer.py          # streaming CSV → SQLite
@@ -431,7 +503,8 @@ re-run `import_source()`; the new content gets its own table.
 ## Not in scope
 
 No embedded LLM, no natural-language-to-SQL in the server, no arbitrary Python
-execution, no pandas/NumPy/matplotlib, no Excel, DuckDB, Polars or Parquet, no
+execution, no pandas/NumPy/matplotlib, no charting or BI layer (`visualize_data()`
+delegates that to your AI client), no Excel, DuckDB, Polars or Parquet, no
 embeddings or vector search, no cloud deployment, authentication, multi-user
 support or background jobs. Your AI client is already the interface and the
 reasoning layer.
