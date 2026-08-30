@@ -146,7 +146,7 @@ def test_tools_are_reachable_over_mcp(project):
             assert names == {
                 "list_sources", "inspect_source", "import_source", "list_tables",
                 "profile_table", "profile_column", "sample_table", "query_sql",
-                "export_query", "delete_table",
+                "export_query", "visualize_data", "delete_table",
             }
 
             sources = await client.call_tool("list_sources", {})
