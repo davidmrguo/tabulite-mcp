@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <meta name="description" content="A line-by-line walkthrough of Tabulite, a local MCP server that imports CSV files into SQLite and queries them read-only — read in the order the dependency graph allows.">
-<title>Reading Tabulite</title>
+<title>Tabulite MCP Codebase Walk-Through</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&display=swap">
@@ -323,8 +323,8 @@ figcaption{
 
 <header class="masthead">
   <p class="eyebrow">Source reading · src/tabulite_mcp · 2,689 lines · 12 modules</p>
-  <h1>Reading <em>Tabulite</em></h1>
-  <p class="standfirst">A line-by-line walkthrough of a local MCP server, in the order the dependency graph lets you read it — written for someone fluent in Python who wants the reasoning, not a tour of the syntax.</p>
+  <h1>Tabulite MCP <em>Codebase Walk-Through</em></h1>
+  <p class="standfirst">Tabulite is a local MCP server that gives an AI client a SQLite runtime instead of the entire source data file. Best for CSV files that are too big for Excel yet too small for a data lake.</p>
   <div class="facts">
     <div><b>12</b> modules</div>
     <div><b>2,689</b> lines</div>
@@ -370,11 +370,9 @@ figcaption{
 <section id="shape">
 <h2><span class="num">ORIENTATION</span>The shape of the thing</h2>
 
-<p>Tabulite is a server that gives an AI client a SQLite runtime instead of data. The client asks questions; the server answers with metadata, aggregates, and files on disk. No rows travel through the conversation unless someone asks for a sample.</p>
+<p>The whole program is a pipeline with six verbs — <strong>discover, import, profile, query, export, visualize</strong> — plus one destructive verb (<strong>delete</strong>) that is deliberately awkward to reach. Almost everything in <code>src/tabulite_mcp</code> serves one of those six.</p>
 
-<p>The whole program is a pipeline with five verbs — <strong>discover, import, profile, query, export</strong> — plus one destructive verb (<strong>delete</strong>) that is deliberately awkward to reach. Almost everything in <code>src/tabulite_mcp</code> serves one of those six.</p>
-
-<p>There is now a seventh, <strong>visualize</strong>, and it is the odd one out: it touches no database, reads no file and computes nothing. It exists to tell the client to draw a chart from a result it already has. Treat it as a deliberate test of the boundary this codebase keeps drawing — the server holds data and refuses to interpret it; rendering is interpretation, so it goes to the client. The interesting part is what had to be built to make that referable at all, which is <code>results.py</code>.</p>
+<p><strong>Visualize</strong> is the odd one out: it doesn't run any data visualization code. It only exists to tell the client to draw a chart from a result it already has. The interesting part is what was built to make that referable, which is <code>results.py</code>.</p>
 
 <p>Two rules explain most of the design decisions you'll meet:</p>
 
