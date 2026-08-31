@@ -1,33 +1,43 @@
 """MCP server exposing a local SQLite runtime over Streamable HTTP.
 
 The tool surface is deliberately small and deterministic: discover sources,
-import them, profile them, run read-only SQL, export results. There is no LLM,
-no natural-language-to-SQL and no domain logic in here — the desktop AI client
-is the reasoning layer.
+import them, profile them, run read-only SQL, export results, chart a result.
+There is no LLM, no natural-language-to-SQL and no domain logic in here — the
+desktop AI client is the reasoning layer.
 """
 
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
+import secrets
 import sqlite3
 import time
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
 from typing import Any, Iterator
 
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import MCPServer, Image
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp_types import CallToolResult, TextContent
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from . import __version__, catalog, database, exporter, importer, profiler
+from . import __version__, catalog, charts, database, exporter, importer, profiler
 from .config import Config
 from .confirm import CONFIRMATION_WORD, ConfirmationError, ConfirmationRegistry
 from .database import QueryTimeout
 from .results import QueryResultError, QueryResultRegistry
-from .security import SecurityError, resolve_source_path, validate_read_only_sql
+from .security import (
+    SecurityError,
+    resolve_source_path,
+    sanitize_output_filename,
+    unique_output_path,
+    validate_read_only_sql,
+)
 
 logger = logging.getLogger("tabulite_mcp")
 
@@ -40,14 +50,20 @@ SOURCE_SUFFIXES = {".csv", ".tsv"}
 CONFIRMATIONS = ConfirmationRegistry()
 
 # Shapes of recent query results, so visualize_data() can name one. Rows are
-# never stored here — the client already has them.
+# never stored here: visualize_data re-runs the recorded statement instead,
+# which keeps a chart tied to a query rather than to a cached copy of it.
 QUERY_RESULTS = QueryResultRegistry()
 
 INSTRUCTIONS = """\
 A local SQLite runtime sitting next to large CSV files.
 
-Typical flow: list_sources -> import_source -> profile_table -> query_sql, and
-export_query when the final result is too large for the conversation.
+Typical flow: list_sources -> import_source -> profile_table -> query_sql ->
+visualize_data when a chart would help, or export_query when the final result
+is too large for the conversation.
+
+Always query first. SQLite does the filtering and the arithmetic; matplotlib
+only draws what a query already returned. There is no path to a chart that
+skips query_sql.
 
 CSV fields are stored as TEXT. Use the TRY_* functions in your SQL to convert
 values safely: TRY_INTEGER, TRY_REAL, TRY_DATE, TRY_DATETIME, TRY_BOOLEAN.
@@ -57,12 +73,20 @@ with COUNT(TRY_REAL(col)) against COUNT(*) when a number matters.
 
 Aggregate inside SQLite rather than pulling raw rows: query_sql is row-capped.
 
-query_sql returns a query_result_id. Pass it to visualize_data when a chart
-would help; rendering happens in your client, not here. Anything you present
-as this project's data has to come from a query result, never from numbers you
-remember or assume. What the user explicitly asks you to draw from scratch is
-their call — it just doesn't go through this tool or get labeled as data from
-here.
+query_sql returns a query_result_id. Pass that id to visualize_data and the
+server draws the chart with matplotlib, returns the image and saves the PNG
+under workspace/charts. Aggregate in SQL first and chart the result: reshaping
+the data is query_sql's job, drawing it is visualize_data's.
+
+Do not write plotting code and do not generate a picture of a chart yourself.
+When the user wants the size, colours, type, title, legend or labels changed,
+call visualize_data again with the argument that controls it, so the chart
+stays tied to the data.
+
+Anything you present as this project's data has to come from a query result,
+never from numbers you remember or assume. What the user explicitly asks you to
+draw from scratch is their call — it just doesn't go through this tool or get
+labeled as data from here.
 
 delete_table is destructive and deliberately two-step: call it once to get a
 warning, show that warning to the user, and only call it again once the user
@@ -429,34 +453,94 @@ def export_query(sql: str, file_name: str | None = None, format: str = "csv") ->
             raise ToolError(f"SQL error: {exc}") from exc
 
 
-@server.tool()
-def visualize_data(query_result_id: str, intent: str | None = None) -> dict[str, Any]:
-    """Visualize a query result you already have, using your own rendering.
+@server.tool(
+    annotations=ToolAnnotations(
+        read_only_hint=False, destructive_hint=False, idempotent_hint=False
+    )
+)
+def visualize_data(
+    query_result_id: str,
+    chart_type: str = "bar",
+    x: str | None = None,
+    y: str | list[str] | None = None,
+    intent: str | None = None,
+    title: str | None = None,
+    x_label: str | None = None,
+    y_label: str | None = None,
+    series_labels: str | list[str] | None = None,
+    width_px: int | None = None,
+    height_px: int | None = None,
+    theme: str = "light",
+    colors: str | list[str] | None = None,
+    highlight: str | list[str] | None = None,
+    legend: bool | None = None,
+    grid: bool = True,
+    stacked: bool = False,
+    value_labels: bool = False,
+    file_name: str | None = None,
+) -> CallToolResult:
+    """Draw a chart of a query result with matplotlib, and return the image.
 
-    Tabulite does not draw anything. This tool hands back a rendering brief for
-    one specific result so you can display it with whatever native
-    visualization your client already supports.
+    QUERY FIRST, THEN CHART. This tool visualizes a result that query_sql()
+    already produced, so the order is always: write the SQL that shapes the
+    data, run it with query_sql(), then pass the query_result_id it returned to
+    this tool. SQLite does the filtering, grouping and arithmetic; matplotlib
+    only draws what came back. If the result is the wrong shape for the picture
+    you want, fix it with another query_sql() and visualize that result instead
+    of trying to reshape it here.
 
-    Use ONLY the rows that query_sql() returned under this query_result_id as
-    the source data. Prefer the simplest visualization that answers the
-    question — a bar chart, line chart, scatter plot or plain table.
+    Tabulite renders the chart itself. It comes back as an image you can show
+    the user directly, and is saved as a PNG under workspace/charts so it
+    survives the conversation.
 
-    Every chart of this project's data must come from a query result. Do not
-    chart numbers you remember, inferred from a profile, or read out of a
-    sample — run query_sql() and visualize what it returns. (If the user asks
-    you outright to draw something of their own, that is between you and them;
-    it simply is not what this tool is for.)
+    The data is not an argument. The server re-runs the statement behind the
+    query_result_id to get the numbers, so what is drawn always matches what
+    the query said. There is no way to plot values you supply, remember, or
+    read out of a profile or a sample.
 
-    Do not query additional data, do not inspect the full underlying table, do
-    not build a dashboard and do not create a custom browser application unless
-    the user explicitly asks for one. If the result is genuinely the wrong
-    shape for a chart, run one more query_sql() to reshape it and visualize
-    that result instead — do not pull extra columns or rows merely to make the
-    picture more elaborate.
+    WHEN THE USER WANTS SOMETHING CHANGED — a different size, a colour, a
+    title, a legend on or off, values on the bars — call this tool again with
+    the argument that controls it. Do not redraw the chart yourself, do not
+    write plotting code, and do not generate an image of a chart: every visual
+    property below is a real matplotlib setting, and using them keeps the
+    picture tied to the data.
+
+    chart_type: bar (default), barh, line, area, scatter or pie.
+      - bar for comparing categories; barh when there are many of them or the
+        names are long; line or area over time; scatter for two numeric columns
+        against each other; pie only for part-to-whole with 6 slices or fewer.
+    x: the column for the category or horizontal axis. Defaults to the first
+      column, which is what a GROUP BY produces.
+    y: the value column, or several for a multi-series chart. Defaults to every
+      remaining numeric column.
+    stacked: stack the series instead of grouping them side by side (bar, barh,
+      area). Use for part-to-whole; a grouped chart compares magnitudes better.
+    highlight: category value(s) to emphasise — those bars take the accent
+      colour and the rest recede to grey. This is the right answer to "make X
+      stand out", and it only applies to a single-series chart.
+    colors: hex colours, one per series (or per slice on a pie), overriding the
+      default palette. Omit unless the user asks for specific colours: the
+      default eight are ordered so neighbouring series stay distinguishable to
+      colour-blind readers.
+    theme: "light" (default) or "dark".
+    width_px: 600 by default. height_px defaults to whatever suits the chart
+      type — and for barh grows with the number of bars, so leave it unset
+      unless the user asks for a specific size.
+    legend: shown automatically for two or more series, hidden for one. Pass
+      true or false to override.
+    value_labels: print the value on each bar, at the end of each line, or as a
+      percentage on each pie slice. Off by default — a number on every point is
+      usually noise.
+    grid, title, x_label, y_label, series_labels: the obvious things.
+    file_name: name for the PNG. One is generated if you omit it, and an
+      existing file is never overwritten.
+
+    Values that are not numbers are left out of the chart rather than drawn as
+    zero, the same way TRY_REAL() skips them in SQL; the count comes back in
+    skipped_values, and it is worth mentioning to the user when it is not zero.
 
     Pass `intent` to record what the user actually asked to see ("revenue by
-    month", "compare channels"); it does not change what is rendered, it only
-    keeps the goal attached to the result.
+    month"); it does not change what is drawn.
     """
     try:
         ref = QUERY_RESULTS.get(query_result_id)
@@ -473,38 +557,123 @@ def visualize_data(query_result_id: str, intent: str | None = None) -> dict[str,
             "with query_sql() and visualize the result of that instead"
         )
 
-    guidance = [
-        "Render this in the client. Tabulite returns no image, chart spec or HTML.",
-        f"Use only the {ref.returned_rows} row(s) already returned for "
-        f"{ref.result_id}; do not re-query to enlarge or embellish the picture.",
-        "Choose a simple, appropriate form: bar, line, scatter or table. Infer the "
-        "axes, series and grouping from the columns and the user's intent.",
-        "No dashboard, no standalone HTML app, no custom browser UI unless the user "
-        "explicitly asked for one.",
-    ]
-    if ref.truncated:
-        guidance.append(
-            f"This result hit the {ref.row_limit}-row cap, so it is a partial view — "
-            "say so alongside the visualization rather than fetching more rows."
+    # The rows are fetched by re-running the recorded statement rather than
+    # accepted as an argument. That is what makes it structurally impossible to
+    # chart anything a query did not produce: there is no parameter to put
+    # invented numbers into.
+    with _read_only() as (db, _):
+        try:
+            statement = validate_read_only_sql(ref.sql)
+            result = database.execute_query(
+                db, statement, CONFIG.max_query_rows, CONFIG.query_timeout_seconds
+            )
+        except (SecurityError, QueryTimeout) as exc:
+            raise _fail(exc) from exc
+        except sqlite3.DatabaseError as exc:
+            raise ToolError(
+                f"re-running {ref.result_id} failed ({exc}). The table it read may have "
+                "been deleted since. Run the query again with query_sql() and "
+                "visualize the new result"
+            ) from exc
+
+    if not result["rows"]:
+        raise ToolError(
+            f"{ref.result_id} returns no rows now, so there is nothing to draw. "
+            "Re-run the query with query_sql() and tell the user what it found"
         )
 
-    return {
-        "status": "render_in_client",
-        "renderer": "ai_client",
+    CONFIG.ensure_directories()
+    try:
+        safe_name = (
+            sanitize_output_filename(file_name, "png", "chart") if file_name
+            else _default_chart_name(chart_type)
+        )
+        target = unique_output_path(CONFIG.charts_dir, safe_name)
+    except SecurityError as exc:
+        raise _fail(exc) from exc
+
+    try:
+        drawn = charts.render(
+            columns=result["columns"],
+            rows=result["rows"],
+            target=target,
+            chart_type=chart_type,
+            x=x,
+            y=y,
+            title=title,
+            x_label=x_label,
+            y_label=y_label,
+            series_labels=series_labels,
+            width_px=width_px or CONFIG.chart_width_px,
+            height_px=height_px,
+            theme=theme,
+            colors=colors,
+            highlight=highlight,
+            legend=legend,
+            grid=grid,
+            stacked=stacked,
+            value_labels=value_labels,
+        )
+    except charts.ChartError as exc:
+        target.unlink(missing_ok=True)
+        raise _fail(exc) from exc
+
+    warnings = list(drawn["warnings"])
+    if result["truncated"]:
+        warnings.append(
+            f"the query hit the {result['row_limit']}-row cap, so this chart shows a "
+            "partial result — say so alongside it rather than presenting it as the whole"
+        )
+
+    payload: dict[str, Any] = {
+        "status": "rendered",
+        "renderer": "matplotlib",
         "query_result_id": ref.result_id,
         "intent": intent,
+        "chart": {
+            "file_name": target.name,
+            "relative_path": str(PurePosixPath("charts") / target.name),
+            "absolute_path": str(target),
+            "format": "png",
+            "file_size_bytes": target.stat().st_size,
+            **{k: v for k, v in drawn.items() if k != "warnings"},
+        },
         "source_result": {
             "produced_by": ref.tool,
             "sql": ref.sql,
-            "columns": list(ref.columns),
-            "returned_rows": ref.returned_rows,
-            "truncated": ref.truncated,
-            "row_limit": ref.row_limit,
+            "columns": list(result["columns"]),
+            "returned_rows": result["returned_rows"],
+            "truncated": result["truncated"],
+            "row_limit": result["row_limit"],
             "created_at": datetime.fromtimestamp(ref.created_at, timezone.utc)
             .isoformat(timespec="seconds"),
         },
-        "guidance": guidance,
+        "warnings": warnings,
+        "notes": [
+            "The image above is the chart. Show it to the user as it is.",
+            "To change anything about it — size, colours, chart type, title, "
+            "legend, labels — call visualize_data() again with the argument for "
+            "that property. Do not draw your own version.",
+        ],
     }
+
+    logger.info(
+        "rendered %s chart for %s -> %s", drawn["chart_type"], ref.result_id, target.name
+    )
+    return CallToolResult(
+        content=[
+            Image(path=target).to_image_content(),
+            TextContent(type="text", text=json.dumps(payload, indent=2, default=str)),
+        ],
+        structured_content=payload,
+    )
+
+
+def _default_chart_name(chart_type: str) -> str:
+    """A sortable, self-describing name for a chart nobody named."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    kind = "".join(c for c in (chart_type or "chart").lower() if c.isalnum()) or "chart"
+    return f"{kind}_{stamp}_{secrets.token_hex(3)}.png"
 
 
 @server.tool(

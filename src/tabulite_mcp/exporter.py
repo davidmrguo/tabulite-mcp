@@ -23,9 +23,9 @@ from .config import Config
 from .database import QueryTimeout, clear_deadline, iter_batches, set_deadline
 from .security import (
     SecurityError,
-    sanitize_export_filename,
+    sanitize_output_filename,
     scrub_sql,
-    unique_export_path,
+    unique_output_path,
 )
 
 EXPORT_BATCH = 5_000
@@ -88,8 +88,9 @@ def export_query(
         raise SecurityError(f"unsupported export format '{fmt}'; use one of {SUPPORTED_FORMATS}")
 
     config.exports_dir.mkdir(parents=True, exist_ok=True)
-    safe_name = sanitize_export_filename(file_name, fmt) if file_name else default_file_name(fmt)
-    target = unique_export_path(config.exports_dir, safe_name)
+    safe_name = (sanitize_output_filename(file_name, fmt, "export") if file_name
+                 else default_file_name(fmt))
+    target = unique_output_path(config.exports_dir, safe_name)
 
     set_deadline(conn, config.export_timeout_seconds)
     try:

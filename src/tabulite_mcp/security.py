@@ -85,18 +85,22 @@ def resolve_source_path(relative_path: str, source_dir: Path) -> Path:
     return resolved
 
 
-def sanitize_export_filename(file_name: str, fmt: str) -> str:
-    """Turn an arbitrary requested name into a bare, safe filename."""
+def sanitize_output_filename(file_name: str, fmt: str, kind: str = "output") -> str:
+    """Turn an arbitrary requested name into a bare, safe filename.
+
+    ``kind`` only names the thing being written ("export", "chart") so the
+    error says which argument the caller got wrong.
+    """
     if "\x00" in file_name:
-        raise SecurityError("export file name contains a null byte")
+        raise SecurityError(f"{kind} file name contains a null byte")
     if "/" in file_name or "\\" in file_name:
-        raise SecurityError(f"export file name must not contain a path: {file_name}")
+        raise SecurityError(f"{kind} file name must not contain a path: {file_name}")
     if ".." in file_name:
-        raise SecurityError(f"export file name must not contain '..': {file_name}")
+        raise SecurityError(f"{kind} file name must not contain '..': {file_name}")
 
     cleaned = _FILENAME_SAFE.sub("_", file_name).strip("._")
     if not cleaned:
-        raise SecurityError(f"export file name is empty after sanitization: {file_name}")
+        raise SecurityError(f"{kind} file name is empty after sanitization: {file_name}")
 
     suffix = f".{fmt}"
     if not cleaned.lower().endswith(suffix):
@@ -104,18 +108,18 @@ def sanitize_export_filename(file_name: str, fmt: str) -> str:
     return cleaned
 
 
-def unique_export_path(exports_dir: Path, file_name: str) -> Path:
-    """Never overwrite an existing export; pick the next free name instead."""
-    target = _resolve_inside(exports_dir, exports_dir / file_name)
+def unique_output_path(directory: Path, file_name: str) -> Path:
+    """Never overwrite an existing file; pick the next free name instead."""
+    target = _resolve_inside(directory, directory / file_name)
     if not target.exists():
         return target
 
     stem, dot, suffix = file_name.partition(".")
     counter = 2
     while True:
-        candidate = exports_dir / f"{stem}_{counter}{dot}{suffix}"
+        candidate = directory / f"{stem}_{counter}{dot}{suffix}"
         if not candidate.exists():
-            return _resolve_inside(exports_dir, candidate)
+            return _resolve_inside(directory, candidate)
         counter += 1
 
 

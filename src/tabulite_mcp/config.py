@@ -47,6 +47,10 @@ class Config:
     export_timeout_seconds: float = 600.0
     max_sample_rows: int = 100
 
+    # Charts. Width is fixed and the height follows the chart type, so a
+    # chart's proportions are a property of its form rather than a guess.
+    chart_width_px: int = 600
+
     # Profiling.
     profile_sample_values: int = 5
     profile_invalid_examples: int = 5
@@ -67,6 +71,11 @@ class Config:
         return self.workspace_dir / "exports"
 
     @property
+    def charts_dir(self) -> Path:
+        """Where rendered charts land. A PNG needs disk, not a conversation."""
+        return self.workspace_dir / "charts"
+
+    @property
     def catalog_path(self) -> Path:
         return self.workspace_dir / "catalog.sqlite"
 
@@ -82,6 +91,7 @@ class Config:
     def ensure_directories(self) -> None:
         self.databases_dir.mkdir(parents=True, exist_ok=True)
         self.exports_dir.mkdir(parents=True, exist_ok=True)
+        self.charts_dir.mkdir(parents=True, exist_ok=True)
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -112,6 +122,7 @@ class Config:
             null_markers=markers,
             insert_batch_size=_env_int("TABULITE_BATCH_SIZE", 5_000),
             max_query_rows=_env_int("TABULITE_MAX_QUERY_ROWS", 1_000),
+            chart_width_px=_env_int("TABULITE_CHART_WIDTH", 600),
             query_timeout_seconds=_env_float("TABULITE_QUERY_TIMEOUT", 30.0),
             export_timeout_seconds=_env_float("TABULITE_EXPORT_TIMEOUT", 600.0),
             host=os.environ.get("TABULITE_HOST", "0.0.0.0"),

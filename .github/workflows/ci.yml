@@ -83,7 +83,7 @@ jobs:
           python -m venv /tmp/wheel-test
           /tmp/wheel-test/bin/pip install dist/*.whl
           test -x /tmp/wheel-test/bin/tabulite-mcp
-          cd /tmp && /tmp/wheel-test/bin/python -c "import tabulite_mcp; from tabulite_mcp import server, security, importer, exporter, catalog, profiler, casting, confirm, database, config; print('wheel ok:', tabulite_mcp.__version__)"
+          cd /tmp && /tmp/wheel-test/bin/python -c "import tabulite_mcp; from tabulite_mcp import server, security, importer, exporter, catalog, profiler, casting, charts, confirm, database, config; print('wheel ok:', tabulite_mcp.__version__)"
 
       - uses: actions/upload-artifact@v7
         with:

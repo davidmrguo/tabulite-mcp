@@ -6,15 +6,18 @@ source/*
 !source/sales.csv
 !source/customers.csv
 
-# The workspace is entirely generated: imported databases, the catalog and
-# exported results. Only the empty directory markers are tracked.
+# The workspace is entirely generated: imported databases, the catalog,
+# exported results and rendered charts. Only the directory markers are tracked.
 workspace/*
 !workspace/databases/
 !workspace/exports/
+!workspace/charts/
 workspace/databases/*
 workspace/exports/*
+workspace/charts/*
 !workspace/databases/.gitkeep
 !workspace/exports/.gitkeep
+!workspace/charts/.gitkeep
 
 # SQLite databases and their journals, wherever they end up.
 *.sqlite
