@@ -322,14 +322,14 @@ figcaption{
 <div class="shell">
 
 <header class="masthead">
-  <p class="eyebrow">Source reading · src/tabulite_mcp · 3,919 lines · 13 modules</p>
+  <p class="eyebrow">Source reading · src/tabulite_mcp</p>
   <h1>Tabulite MCP <em>Codebase Walk-Through</em></h1>
   <p class="standfirst">Tabulite is a local MCP server that gives an AI client a SQLite runtime instead of the entire source data file. Best for CSV files that are too big for Excel yet too small for a data lake.</p>
   <div class="facts">
-    <div><b>13</b> modules</div>
-    <div><b>3,919</b> lines</div>
-    <div><b>2</b> runtime dependencies</div>
-    <div><b>4</b> read-only locks</div>
+    <div>Python <b>3.11+</b></div>
+    <div>sqlite3 <b>stdlib</b></div>
+    <div>mcp <b>2.1.1</b></div>
+    <div>matplotlib <b>3.8+</b></div>
   </div>
 </header>
 
@@ -484,7 +484,7 @@ figcaption{
 
 <!-- ============================================================ -->
 <section id="m1">
-<h2><span class="num">MODULE 1 — 8 lines</span><code>__init__.py</code></h2>
+<h2><span class="num">MODULE 1</span><code>__init__.py</code></h2>
 <p class="deps"><b>imports:</b> nothing &nbsp;·&nbsp; <b>exports:</b> <code>__version__</code></p>
 
 <pre><code>"""Local MCP server that imports CSV files into SQLite and queries them safely.
@@ -496,7 +496,7 @@ visualize — the last of which charts a query result, never a table directly.
 
 __version__ = "0.1.0"</code></pre>
 
-<p>Two things are happening in seven lines.</p>
+<p>Two things are happening here.</p>
 
 <ol class="notes">
 <li>The docstring states the architectural boundary. "The reasoning layer lives in the desktop AI client" is the sentence that justifies every later decision not to add cleverness to the server.</li>
@@ -507,7 +507,7 @@ __version__ = "0.1.0"</code></pre>
 
 <!-- ============================================================ -->
 <section id="m2">
-<h2><span class="num">MODULE 2 — 132 lines</span><code>config.py</code></h2>
+<h2><span class="num">MODULE 2</span><code>config.py</code></h2>
 <p class="deps"><b>imports:</b> <code>os</code>, <code>dataclasses</code>, <code>pathlib</code> &nbsp;·&nbsp; <b>job:</b> all environment reading, in one place</p>
 
 <p>The docstring states the contract plainly: <em>"the rest of the modules stay free of environment lookups and are easy to test."</em> That is the whole point of the module. If you ever find an <code>os.environ</code> outside this file, something has gone wrong.</p>
@@ -603,7 +603,7 @@ default_origins = tuple(f"http://{h}" for h in default_hosts)</code></pre>
 
 <!-- ============================================================ -->
 <section id="m3">
-<h2><span class="num">MODULE 3 — 140 lines</span><code>casting.py</code></h2>
+<h2><span class="num">MODULE 3</span><code>casting.py</code></h2>
 <p class="deps"><b>imports:</b> <code>re</code>, <code>sqlite3</code>, <code>datetime</code> &nbsp;·&nbsp; <b>job:</b> five SQL functions that refuse to guess</p>
 
 <p>This module exists because of one SQLite behaviour, stated at the top of the file:</p>
@@ -699,7 +699,7 @@ _REAL_RE    = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")</code></p
 
 <!-- ============================================================ -->
 <section id="m4">
-<h2><span class="num">MODULE 4 — 328 lines</span><code>security.py</code></h2>
+<h2><span class="num">MODULE 4</span><code>security.py</code></h2>
 <p class="deps"><b>imports:</b> <code>logging</code>, <code>re</code>, <code>sqlite3</code>, <code>pathlib</code> &nbsp;·&nbsp; <b>job:</b> two containment problems — filesystem and SQL</p>
 
 <p>The biggest module that isn't the server, and the one where reading every line pays off most. It answers two questions: <em>can this path escape the project directory?</em> and <em>can this statement do anything but read?</em></p>
@@ -982,7 +982,7 @@ def _authorizer(action, arg1, arg2, db_name, trigger) -> int:
 
 <!-- ============================================================ -->
 <section id="m5">
-<h2><span class="num">MODULE 5 — 210 lines</span><code>database.py</code></h2>
+<h2><span class="num">MODULE 5</span><code>database.py</code></h2>
 <p class="deps"><b>imports:</b> <code>.casting</code>, <code>.security</code> &nbsp;·&nbsp; <b>job:</b> connections, deadlines, and small SQL helpers</p>
 
 <p>Thin by design. It assembles the pieces from <code>casting</code> and <code>security</code> into two kinds of connection, and adds the one thing neither of them can provide: a time limit.</p>
@@ -1132,7 +1132,7 @@ if truncated:
 
 <!-- ============================================================ -->
 <section id="m6">
-<h2><span class="num">MODULE 6 — 300 lines</span><code>catalog.py</code></h2>
+<h2><span class="num">MODULE 6</span><code>catalog.py</code></h2>
 <p class="deps"><b>imports:</b> <code>json</code>, <code>sqlite3</code>, <code>datetime</code>, <code>pathlib</code> &nbsp;·&nbsp; <b>job:</b> the server's own bookkeeping, in its own file</p>
 
 <p>Four tables in a <em>separate</em> SQLite database. The docstring gives the reason in one line: <em>"so that server metadata never mixes with the analytical tables the AI queries."</em></p>
@@ -1241,7 +1241,7 @@ except Exception:
 
 <!-- ============================================================ -->
 <section id="m7">
-<h2><span class="num">MODULE 7 — 371 lines</span><code>importer.py</code></h2>
+<h2><span class="num">MODULE 7</span><code>importer.py</code></h2>
 <p class="deps"><b>imports:</b> <code>.catalog</code>, <code>.config</code>, <code>.database</code>, <code>.security</code> &nbsp;·&nbsp; <b>job:</b> CSV to SQLite in one pass, bounded memory</p>
 
 <p>The largest module after the server, and the one with the most going on per line. Two ideas dominate: <strong>one pass over the file does everything</strong>, and <strong>identity is the content hash</strong>.</p>
@@ -1515,7 +1515,7 @@ db_conn.execute(f"ALTER TABLE {quote(staging)} RENAME TO {quote(final_name)}")</
 
 <!-- ============================================================ -->
 <section id="m8">
-<h2><span class="num">MODULE 8 — 167 lines</span><code>profiler.py</code></h2>
+<h2><span class="num">MODULE 8</span><code>profiler.py</code></h2>
 <p class="deps"><b>imports:</b> <code>.casting</code>, <code>.config</code>, <code>.database</code> &nbsp;·&nbsp; <b>job:</b> work out what each TEXT column appears to mean</p>
 
 <p>The importer refuses to interpret anything. This module does the interpreting — and, crucially, <strong>does not act on it</strong>. The docstring is emphatic: <em>"The result is evidence handed to the AI — the stored data is never rewritten because of an inferred type."</em></p>
@@ -1622,7 +1622,7 @@ for batch in iter_batches(cursor, SCAN_BATCH):
 
 <!-- ============================================================ -->
 <section id="m9">
-<h2><span class="num">MODULE 9 — 144 lines</span><code>exporter.py</code></h2>
+<h2><span class="num">MODULE 9</span><code>exporter.py</code></h2>
 <p class="deps"><b>imports:</b> <code>.catalog</code>, <code>.config</code>, <code>.database</code>, <code>.security</code> &nbsp;·&nbsp; <b>job:</b> the escape hatch from the row cap</p>
 
 <p><code>query_sql</code> is capped at 1,000 rows to protect the conversation. When the answer <em>is</em> the dataset, this module runs the same validated SQL and streams the result to disk instead — same safety, no cap, no context cost.</p>
@@ -1710,7 +1710,7 @@ def referenced_tables(sql: str, known_tables: list[str]) -> list[str]:
 
 <!-- ============================================================ -->
 <section id="m10">
-<h2><span class="num">MODULE 10 — 104 lines</span><code>confirm.py</code></h2>
+<h2><span class="num">MODULE 10</span><code>confirm.py</code></h2>
 <p class="deps"><b>imports:</b> <code>secrets</code>, <code>threading</code>, <code>time</code>, <code>dataclasses</code> &nbsp;·&nbsp; <b>job:</b> make destruction require two calls</p>
 
 <p>The most interesting module in the codebase, because it's solving a problem most software doesn't have: <strong>the caller is a language model, and the model can be talked into things.</strong></p>
@@ -1799,7 +1799,7 @@ def _purge_locked(self) -> None:
 
 <!-- ============================================================ -->
 <section id="m11">
-<h2><span class="num">MODULE 11 — 115 lines</span><code>results.py</code></h2>
+<h2><span class="num">MODULE 11</span><code>results.py</code></h2>
 <p class="deps"><b>imports:</b> <code>secrets</code>, <code>threading</code>, <code>time</code>, <code>collections</code>, <code>dataclasses</code> &nbsp;·&nbsp; <b>job:</b> let a later tool name an earlier query result</p>
 
 <p>Read this one straight after <code>confirm.py</code>. It is the same shape — an in-memory registry, a lock, a dataclass, careful error strings — solving a different problem, and the places where it <em>diverges</em> from <code>confirm.py</code> are all deliberate. Holding the two side by side is the fastest way to see why each choice was made.</p>
@@ -1882,7 +1882,7 @@ class QueryResultRef:
 
 <!-- ============================================================ -->
 <section id="m12">
-<h2><span class="num">MODULE 12 — 1,044 lines</span><code>charts.py</code></h2>
+<h2><span class="num">MODULE 12</span><code>charts.py</code></h2>
 <p class="deps"><b>imports:</b> <code>math</code>, <code>dataclasses</code>, <code>matplotlib</code>, <code>.casting</code> &nbsp;·&nbsp; <b>job:</b> turn a result set into a PNG, the same way every time</p>
 
 <p>The newest module, and the one that most needs its premise stated before its code. Tabulite has no opinion about what your data means; it does have opinions about what a bar chart looks like. Those are different kinds of judgement, and this module is where the second kind is allowed to live. Everything a user might reasonably want changed arrives as an argument; everything else is decided once, here, rather than improvised per chart.</p>
@@ -1955,7 +1955,7 @@ rx, ry = abs(offset[0] - origin[0]), abs(offset[1] - origin[1])</code></pre>
 
 <!-- ============================================================ -->
 <section id="m13">
-<h2><span class="num">MODULE 13 — 856 lines</span><code>server.py</code></h2>
+<h2><span class="num">MODULE 13</span><code>server.py</code></h2>
 <p class="deps"><b>imports:</b> everything &nbsp;·&nbsp; <b>job:</b> eleven tools, one health check, and the docstrings that teach the model</p>
 
 <p>The rind. It contains no analysis logic at all — every tool is a few lines of validation, a context manager, a call into a lower module, and a dict. What it <em>does</em> contain, and what deserves the most attention, is prose: the tool docstrings are shipped to the model as the API description, and they're doing as much work as the code.</p>
@@ -2355,7 +2355,7 @@ async def health(request: Request) -> JSONResponse:
 
 <p><strong>Preserve ambiguity until someone can resolve it.</strong> The importer stores everything as TEXT and refuses to guess. The profiler measures and reports evidence but changes nothing. The AI — with the user's question in hand — decides. Each layer does only what it can do correctly and hands the rest upward, so no layer is ever in the position of guessing on someone else's behalf.</p>
 
-<p class="footer">Written against <code>src/tabulite_mcp</code> at commit <code>6c2f770</code> · 3,919 lines across 13 modules · mcp 2.1.1, matplotlib 3.8+, Python 3.11+</p>
+<p class="footer">Written against <code>src/tabulite_mcp</code> · Python 3.11+, the standard library's <code>sqlite3</code>, mcp 2.1.1, matplotlib 3.8+</p>
 </section>
 
 </main>
