@@ -9,7 +9,7 @@ services:
     volumes:
       # Large CSV files stay here, read-only. They are never uploaded to the AI.
       - ./source:/project/source:ro
-      # Imported SQLite databases, the catalog and exported results.
+      # Imported SQLite databases, the catalog, exported results and charts.
       - ./workspace:/project/workspace
     environment:
       TABULITE_SOURCE_DIR: /project/source

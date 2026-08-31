@@ -322,13 +322,13 @@ figcaption{
 <div class="shell">
 
 <header class="masthead">
-  <p class="eyebrow">Source reading · src/tabulite_mcp · 2,689 lines · 12 modules</p>
+  <p class="eyebrow">Source reading · src/tabulite_mcp · 3,919 lines · 13 modules</p>
   <h1>Tabulite MCP <em>Codebase Walk-Through</em></h1>
   <p class="standfirst">Tabulite is a local MCP server that gives an AI client a SQLite runtime instead of the entire source data file. Best for CSV files that are too big for Excel yet too small for a data lake.</p>
   <div class="facts">
-    <div><b>12</b> modules</div>
-    <div><b>2,689</b> lines</div>
-    <div><b>1</b> runtime dependency</div>
+    <div><b>13</b> modules</div>
+    <div><b>3,919</b> lines</div>
+    <div><b>2</b> runtime dependencies</div>
     <div><b>4</b> read-only locks</div>
   </div>
 </header>
@@ -352,7 +352,8 @@ figcaption{
     <li><a href="#m9"><span class="n">9</span><span>exporter.py</span></a></li>
     <li><a href="#m10"><span class="n">10</span><span>confirm.py</span></a></li>
     <li><a href="#m11"><span class="n">11</span><span>results.py</span></a></li>
-    <li><a href="#m12"><span class="n">12</span><span>server.py</span></a></li>
+    <li><a href="#m12"><span class="n">12</span><span>charts.py</span></a></li>
+    <li><a href="#m13"><span class="n">13</span><span>server.py</span></a></li>
   </ol>
   <h4>Themes</h4>
   <ol>
@@ -372,7 +373,9 @@ figcaption{
 
 <p>The whole program is a pipeline with six verbs — <strong>discover, import, profile, query, export, visualize</strong> — plus one destructive verb (<strong>delete</strong>) that is deliberately awkward to reach. Almost everything in <code>src/tabulite_mcp</code> serves one of those six.</p>
 
-<p><strong>Visualize</strong> is the odd one out: it doesn't run any data visualization code. It only exists to tell the client to draw a chart from a result it already has. The interesting part is what was built to make that referable, which is <code>results.py</code>.</p>
+<p>The verbs are ordered, and the last two depend on the fourth: <strong>export</strong> and <strong>visualize</strong> both act on a query result rather than on a table. You cannot chart a CSV here — you query it, and then you chart what the query returned. SQLite does the filtering and the arithmetic; matplotlib is handed the rows it produced and does nothing but draw them.</p>
+
+<p><strong>Visualize</strong> is still the odd one out, for a different reason than it used to be. It is the only verb that both reads the database and writes a file, and the only one whose output is an image rather than data. Two modules carry it: <code>results.py</code>, which makes a query result nameable at all, and <code>charts.py</code>, which is the one place in the codebase allowed to have opinions about what a bar chart should look like.</p>
 
 <p>Two rules explain most of the design decisions you'll meet:</p>
 
@@ -408,7 +411,7 @@ figcaption{
 
 <figure>
 <div class="diagram-wrap">
-<svg viewBox="0 0 700 300" role="img" aria-label="Dependency graph: config, casting, security, catalog, confirm and results are leaves that import nothing from the package; database depends on casting and security; importer depends on catalog, config, database, security; profiler on casting, config, database; exporter on catalog, config, database, security; server depends on everything.">
+<svg viewBox="0 0 700 300" role="img" aria-label="Dependency graph: config, casting, security, catalog, confirm and results are leaves that import nothing from the package; database depends on casting and security; importer depends on catalog, config, database, security; profiler on casting, config, database; exporter on catalog, config, database, security; charts depends on casting; server depends on everything.">
   <defs>
     <marker id="ah" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
       <path d="M0,0 L6,3 L0,6 z" fill="currentColor" opacity=".45"/>
@@ -442,6 +445,8 @@ figcaption{
   <!-- tier 2 -->
   <rect class="bx" x="215" y="115" width="112" height="30" rx="3"/>
   <text class="tx" x="227" y="129">database</text><text class="tn" x="227" y="140">5</text>
+  <rect class="bx" x="380" y="115" width="112" height="30" rx="3"/>
+  <text class="tx" x="392" y="129">charts</text><text class="tn" x="392" y="140">12</text>
 
   <!-- tier 3 -->
   <rect class="bx" x="40" y="200" width="112" height="30" rx="3"/>
@@ -453,10 +458,12 @@ figcaption{
 
   <!-- tier 4 -->
   <rect class="bx top" x="480" y="200" width="150" height="42" rx="3"/>
-  <text class="tx" x="494" y="219">server</text><text class="tn" x="494" y="232">12 · imports all of them</text>
+  <text class="tx" x="494" y="219">server</text><text class="tn" x="494" y="232">13 · imports all of them</text>
 
-  <!-- edges into database -->
+  <!-- edges into database and charts -->
   <path class="ln" d="M182,50 C182,82 246,86 258,113" marker-end="url(#ah)"/>
+  <path class="ln" d="M200,50 C200,84 414,80 426,113" marker-end="url(#ah)"/>
+  <path class="ln" d="M446,145 C446,170 506,174 516,198" marker-end="url(#ah)"/>
   <path class="ln" d="M294,50 C294,80 288,88 285,113" marker-end="url(#ah)"/>
   <!-- database into tier 3 -->
   <path class="ln" d="M250,145 C250,170 120,172 100,198" marker-end="url(#ah)"/>
@@ -477,13 +484,14 @@ figcaption{
 
 <!-- ============================================================ -->
 <section id="m1">
-<h2><span class="num">MODULE 1 — 7 lines</span><code>__init__.py</code></h2>
+<h2><span class="num">MODULE 1 — 8 lines</span><code>__init__.py</code></h2>
 <p class="deps"><b>imports:</b> nothing &nbsp;·&nbsp; <b>exports:</b> <code>__version__</code></p>
 
 <pre><code>"""Local MCP server that imports CSV files into SQLite and queries them safely.
 
 The reasoning layer lives in the desktop AI client. This package only provides
-deterministic tools: discover, import, profile, query (read-only) and export.
+deterministic tools: discover, import, profile, query (read-only), export and
+visualize — the last of which charts a query result, never a table directly.
 """
 
 __version__ = "0.1.0"</code></pre>
@@ -499,7 +507,7 @@ __version__ = "0.1.0"</code></pre>
 
 <!-- ============================================================ -->
 <section id="m2">
-<h2><span class="num">MODULE 2 — 121 lines</span><code>config.py</code></h2>
+<h2><span class="num">MODULE 2 — 132 lines</span><code>config.py</code></h2>
 <p class="deps"><b>imports:</b> <code>os</code>, <code>dataclasses</code>, <code>pathlib</code> &nbsp;·&nbsp; <b>job:</b> all environment reading, in one place</p>
 
 <p>The docstring states the contract plainly: <em>"the rest of the modules stay free of environment lookups and are easy to test."</em> That is the whole point of the module. If you ever find an <code>os.environ</code> outside this file, something has gone wrong.</p>
@@ -691,7 +699,7 @@ _REAL_RE    = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")</code></p
 
 <!-- ============================================================ -->
 <section id="m4">
-<h2><span class="num">MODULE 4 — 324 lines</span><code>security.py</code></h2>
+<h2><span class="num">MODULE 4 — 328 lines</span><code>security.py</code></h2>
 <p class="deps"><b>imports:</b> <code>logging</code>, <code>re</code>, <code>sqlite3</code>, <code>pathlib</code> &nbsp;·&nbsp; <b>job:</b> two containment problems — filesystem and SQL</p>
 
 <p>The biggest module that isn't the server, and the one where reading every line pays off most. It answers two questions: <em>can this path escape the project directory?</em> and <em>can this statement do anything but read?</em></p>
@@ -1614,7 +1622,7 @@ for batch in iter_batches(cursor, SCAN_BATCH):
 
 <!-- ============================================================ -->
 <section id="m9">
-<h2><span class="num">MODULE 9 — 143 lines</span><code>exporter.py</code></h2>
+<h2><span class="num">MODULE 9 — 144 lines</span><code>exporter.py</code></h2>
 <p class="deps"><b>imports:</b> <code>.catalog</code>, <code>.config</code>, <code>.database</code>, <code>.security</code> &nbsp;·&nbsp; <b>job:</b> the escape hatch from the row cap</p>
 
 <p><code>query_sql</code> is capped at 1,000 rows to protect the conversation. When the answer <em>is</em> the dataset, this module runs the same validated SQL and streams the result to disk instead — same safety, no cap, no context cost.</p>
@@ -1817,7 +1825,7 @@ class QueryResultRef:
 <ol class="notes">
 <li><strong>The client already has the rows.</strong> They were returned by <code>query_sql</code> and are sitting in its context. Keeping a second copy server-side would mean memory growth proportional to query output, on a server whose defining discipline everywhere else is that rows do not accumulate in RAM. That would be the one place the streaming principle got quietly abandoned, and for a chart.</li>
 <li><strong>Two copies means a staleness question</strong> that has no good answer. If the table is re-imported between the query and the visualization, which copy is right? Storing nothing to compare makes the question disappear.</li>
-<li>What is left is exactly enough to <em>validate</em> a reference and <em>describe</em> it: the SQL that produced it, the column names, how many rows came back, whether the cap was hit. That is the payload <code>visualize_data</code> needs to write an accurate brief, and nothing more.</li>
+<li>What is left is exactly enough to <em>validate</em> a reference and <em>re-derive</em> it: above all the SQL. <code>visualize_data</code> does not need a copy of the rows because it can run the statement again and get them — from the database, at the moment the chart is drawn. Keeping the SQL instead of the result is what makes the cache unnecessary rather than merely undesirable, and it is why the two problems above never have to be answered.</li>
 <li><code>frozen=True</code> and <code>columns</code> as a <code>tuple</code> rather than a list — the record is immutable once made. Nothing can mutate a reference after the fact and make the brief describe a result that never existed.</li>
 </ol>
 
@@ -1868,13 +1876,86 @@ class QueryResultRef:
 <div class="aside">
 <span class="tag">The property this buys</span>
 <p>Ids are minted in <strong>exactly one place</strong>: inside <code>query_sql</code>, after validation has passed and the statement has actually executed. Nothing else calls <code>record()</code>. A query that errored or was rejected mints nothing, because the call sits below the exception handlers; <code>sample_table</code> and <code>export_query</code> return rows but no id; a profile has none.</p>
-<p>The consequence is that <code>visualize_data</code> cannot produce a rendering brief unless a real query really ran — not by convention, but because there is no other way for the argument it requires to come into existence. It is the same style of structural guarantee as the two-step delete, and it has the same honest limit: it constrains what leaves this server, and says nothing about what a client chooses to draw on its own.</p>
+<p>The consequence is that <code>visualize_data</code> cannot draw a chart unless a real query really ran — not by convention, but because there is no other way for the argument it requires to come into existence. It is the same style of structural guarantee as the two-step delete, and it has the same honest limit: it constrains what leaves this server, and says nothing about what a client chooses to draw on its own.</p>
 </div>
 </section>
 
 <!-- ============================================================ -->
 <section id="m12">
-<h2><span class="num">MODULE 12 — 687 lines</span><code>server.py</code></h2>
+<h2><span class="num">MODULE 12 — 1,044 lines</span><code>charts.py</code></h2>
+<p class="deps"><b>imports:</b> <code>math</code>, <code>dataclasses</code>, <code>matplotlib</code>, <code>.casting</code> &nbsp;·&nbsp; <b>job:</b> turn a result set into a PNG, the same way every time</p>
+
+<p>The newest module, and the one that most needs its premise stated before its code. Tabulite has no opinion about what your data means; it does have opinions about what a bar chart looks like. Those are different kinds of judgement, and this module is where the second kind is allowed to live. Everything a user might reasonably want changed arrives as an argument; everything else is decided once, here, rather than improvised per chart.</p>
+
+<h4>No pyplot</h4>
+
+<pre><code>matplotlib.use("Agg")               # headless: no display, no GUI toolkit
+
+from matplotlib.figure import Figure
+
+matplotlib.rcParams.update({...})   # written once at import, never mutated</code></pre>
+
+<ol class="notes">
+<li>Charts are built with <code>Figure(...)</code> directly rather than through <code>pyplot</code>. <code>pyplot</code> keeps a global registry of figures and a notion of "the current axes" — process-wide mutable state, on a server that can be handling more than one request at a time. The object-oriented API has no such state, so two concurrent charts cannot interleave.</li>
+<li>For the same reason <code>rcParams</code> is written exactly once, at import, and never touched again. <code>rc_context</code> would have been the natural way to scope styling to one chart, and it is a global mutation with a lock-shaped hole in it. Anything that genuinely varies per chart — every colour, every size — is set on the <code>Figure</code> instead.</li>
+<li>The font is pinned to DejaVu Sans, which ships inside matplotlib. Naming it explicitly means a chart rendered in the container and one rendered on a laptop are the same image, and no font-fallback warning is ever emitted. It also makes the determinism claim testable: the same result and the same arguments produce the same PNG, byte for byte.</li>
+</ol>
+
+<h4>The chart and the aggregate agree about what a number is</h4>
+
+<pre><code>def _number(value: object) -> float:
+    if isinstance(value, (int, float)):
+        return float(value) if math.isfinite(float(value)) else math.nan
+    converted = try_real(value)
+    return math.nan if converted is None else converted</code></pre>
+
+<p>This is the reason <code>charts.py</code> imports <code>casting</code> and nothing else from the package. A value that <code>TRY_REAL</code> would have skipped in a <code>SUM</code> is a value the chart skips too.</p>
+
+<ol class="notes">
+<li>A row whose value will not convert gets <strong>no bar</strong> — never a bar of height zero. This is <code>CAST</code>'s <code>0.0</code> problem in visual form, and it is worse here than in SQL: a zero-height bar reads as "this category had none", which is a specific and wrong claim. An absent bar reads as "no data", which is true.</li>
+<li>The count comes back in <code>skipped_values</code>, and the tool attaches a warning when it is non-zero, so the model has something concrete to say out loud rather than a silently thinner chart.</li>
+<li>A category that is <code>NULL</code> is labelled <code>(null)</code> rather than left blank. An unlabelled bar reads as a rendering bug; it is actually a real group in the data whose key is missing, and naming it says so.</li>
+<li>If <em>nothing</em> in the selected column converts, the render fails with a message pointing at <code>TRY_REAL</code> and <code>profile_column</code>. An empty chart would have been the fail-open answer.</li>
+</ol>
+
+<h4>Two measurements that had to be deferred</h4>
+
+<p>Two of the visual specs are stated in pixels but have to be applied in data coordinates, and neither can be computed until the layout has settled. Both are handled by drawing the figure once, measuring, and then acting.</p>
+
+<pre><code>fig.draw_without_rendering()
+origin = ax.transData.inverted().transform((0.0, 0.0))
+offset = ax.transData.inverted().transform((BAR_END_RADIUS_PX, BAR_END_RADIUS_PX))
+rx, ry = abs(offset[0] - origin[0]), abs(offset[1] - origin[1])</code></pre>
+
+<ol class="notes">
+<li><strong>Rounded bar ends.</strong> The spec is a 4px radius on the data end of each bar, square at the baseline. matplotlib bars are rectangles, so each one is replaced with a <code>PathPatch</code> whose far corners are rounded. <code>rx</code> and <code>ry</code> are computed separately because the two axes have different data-per-pixel scales: passing the same number of <em>pixels</em> through each makes the corner circular on screen even though it is elliptical in data space. On a stacked bar only the outermost segment gets it; the interior ones butt against their neighbours.</li>
+<li>Ordering matters and was wrong once. The rounding runs <em>after</em> the axis limits and tick labels are final, because rotating a tick label changes the axes box, which changes the data-per-pixel scale, which changes what 4px means.</li>
+<li><strong>Tick labels are measured, not estimated.</strong> The first version guessed a label's width from its character count, and produced <code>2025-012025-02</code> along the bottom of a twelve-month chart. The rewrite lays the figure out, compares the rendered bounding boxes, and rotates — then thins to every second label — until nothing overlaps, in a bounded loop. Guessing at text metrics is the kind of thing that looks right on the sample data and fails on real column names.</li>
+</ol>
+
+<h4>The palette is a fixed list, and running out is an error</h4>
+
+<pre><code>if len(y_indexes) &gt; limit:
+    raise ChartError(
+        f"{len(y_indexes)} series is too many for a {chart_type} chart — {reason}. "
+        "Group the tail into an 'Other' bucket in SQL, or draw fewer series")</code></pre>
+
+<ol class="notes">
+<li>Eight hues, in a fixed order, each checked for colour-vision separation against both the light and the dark surface. The <em>order</em> is the mechanism, not decoration: it is what keeps neighbouring series distinguishable, so the hues are assigned by series and never cycled or re-sorted by rank.</li>
+<li>A ninth series does not get a ninth colour. A generated hue is indistinguishable from an existing one under colour-vision deficiency, so the honest options are to fold the tail into an "Other" bucket or draw fewer series — and both of those are the caller's decision, which makes this an error rather than a silent degradation. It is the same instinct as refusing an empty result: fail where the user can see it.</li>
+<li>Scatter plots cap at three rather than eight. Bars and lines only ever put <em>adjacent</em> series next to each other; a scatter puts every series against every other one, and the palette's separation guarantees do not survive that. The error says which of the two situations the caller is in.</li>
+<li><code>highlight=</code> exists because "make X stand out" is a real request with a bad default answer. Given a category, the matching bars take the accent colour and the rest recede to grey — implemented by splitting the one series into two with complementary gaps, so every bar keeps its slot and only its colour changes.</li>
+</ol>
+
+<div class="aside">
+<span class="tag">The shape of the decision</span>
+<p>Every visual property in this module is either an argument or a constant. There is no third category — nothing is inferred from the data at render time, and nothing is left to a model's discretion once <code>render()</code> has been called. That is what makes "call it again with <code>width_px=900</code>" a complete answer to "can you make that bigger", and it is the whole reason the tool takes eighteen keyword arguments rather than a prompt.</p>
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section id="m13">
+<h2><span class="num">MODULE 13 — 856 lines</span><code>server.py</code></h2>
 <p class="deps"><b>imports:</b> everything &nbsp;·&nbsp; <b>job:</b> eleven tools, one health check, and the docstrings that teach the model</p>
 
 <p>The rind. It contains no analysis logic at all — every tool is a few lines of validation, a context manager, a call into a lower module, and a dict. What it <em>does</em> contain, and what deserves the most attention, is prose: the tool docstrings are shipped to the model as the API description, and they're doing as much work as the code.</p>
@@ -1909,11 +1990,11 @@ with COUNT(TRY_REAL(col)) against COUNT(*) when a number matters.
 Aggregate inside SQLite rather than pulling raw rows: query_sql is row-capped.
 
 query_sql returns a query_result_id. Pass it to visualize_data when a chart
-would help; rendering happens in your client, not here. Anything you present
-as this project's data has to come from a query result, never from numbers you
-remember or assume. What the user explicitly asks you to draw from scratch is
-their call — it just doesn't go through this tool or get labeled as data from
-here.
+would help: the server draws the chart with matplotlib, returns the image and
+saves the PNG under workspace/charts. Do not write plotting code or generate a
+picture of a chart yourself — when the user wants the size, colours, type,
+title, legend or labels changed, call visualize_data again with the argument
+that controls it, so the chart stays tied to the data.
 ..."""</code></pre>
 
 <p>This string is sent to the model during the MCP handshake, before any tool is called. It is, functionally, the system prompt for this server — and it's written the way good documentation is written, not the way prompts usually are.</p>
@@ -1980,7 +2061,7 @@ def _writable() -> Iterator[tuple[sqlite3.Connection, sqlite3.Connection]]:
 <tr><td><code>sample_table</code></td><td>read-only</td><td><code>limit</code> validated <code>&gt;= 1</code>, clamped to <code>max_sample_rows</code>, then <code>int()</code>-cast before interpolation. Belt and braces on an already-validated integer.</td></tr>
 <tr><td><code>query_sql</code></td><td>read-only</td><td>The main event. Validate, execute, cap, report truncation — then record the result's shape and return a <code>query_result_id</code> with it. That last line is the only writer the results registry has.</td></tr>
 <tr><td><code>export_query</code></td><td>read-only</td><td>Same validation, no cap, streams to disk.</td></tr>
-<tr><td><code>visualize_data</code></td><td><strong>none</strong></td><td>The only tool that opens no connection and touches no file. A dictionary lookup and a dict literal — see below.</td></tr>
+<tr><td><code>visualize_data</code></td><td>read-only</td><td>Looks up the reference, <em>re-runs its SQL</em>, renders a PNG. The only tool that both reads the database and writes a file — see below.</td></tr>
 <tr><td><code>delete_table</code></td><td>writable</td><td>The only destructive tool, and the only one with <code>ToolAnnotations</code>.</td></tr>
 </tbody>
 </table>
@@ -2002,29 +2083,33 @@ if not profiles:
 <li>Note the re-read after the write: <code>computed</code> is discarded and <code>get_column_profiles</code> is called again. That's deliberate — the round trip through the database adds <code>profiled_at</code> and normalizes the JSON columns, so both branches return an identically-shaped dict. Without it, the fresh and cached paths would differ in subtle ways.</li>
 </ol>
 
-<h4><code>visualize_data</code> — a tool that computes nothing</h4>
+<h4><code>visualize_data</code> — where the rows come from</h4>
+
+<p>This tool was once the clearest illustration in the codebase of <em>the docstring is the API</em>: a lookup, a guard, and a dict of English telling the client to go and draw something. It now renders the chart itself, and the interesting part is which of the old arguments survived that change and which did not.</p>
 
 <pre><code>ref = QUERY_RESULTS.get(query_result_id)          # raises -&gt; _fail -&gt; ToolError
-
 if ref.returned_rows == 0:
-    raise ToolError(
-        f"{ref.result_id} returned no rows, so there is nothing to visualize. "
-        "Tell the user the query found no data — do not put remembered or "
-        "assumed values in its place. ...")
+    raise ToolError(f"{ref.result_id} returned no rows, ...")
 
-return {"status": "render_in_client", "renderer": "ai_client",
-        "query_result_id": ref.result_id, "intent": intent,
-        "source_result": {...}, "guidance": [...]}</code></pre>
+with _read_only() as (db, _):
+    statement = validate_read_only_sql(ref.sql)
+    result = database.execute_query(
+        db, statement, CONFIG.max_query_rows, CONFIG.query_timeout_seconds)
 
-<p>Strip the strings out and there is nothing left: a lookup, a guard, a dict. No SQL, no connection, no file. It is the clearest illustration in the codebase of the fourth mechanism from the orientation — <strong>the docstring is the API</strong> — because here the docstring and the returned prose are the <em>entire</em> feature. The Python is scaffolding for delivering English to a model.</p>
+drawn = charts.render(columns=result["columns"], rows=result["rows"], ...)
+return CallToolResult(
+    content=[Image(path=target).to_image_content(), TextContent(...)],
+    structured_content=payload)</code></pre>
 
 <ol class="notes">
-<li><strong>The signature is the design.</strong> <code>visualize_data(query_result_id, intent=None)</code> and that is all. No <code>x</code>, no <code>y</code>, no <code>series</code>, no <code>chart_type</code>, no <code>color</code>. Every one of those would be the server making a decision it cannot make well — it has the column names, but the model has the user's question, and choosing axes is a question about intent. Adding them would also have created a chart-spec vocabulary that then has to be versioned, documented and mapped onto whatever the client actually renders with. The absent parameters are the feature.</li>
-<li><code>intent</code> is a free-text field that changes nothing in the response. It exists so the goal travels with the reference rather than being reconstructed from context. Cheap, and it makes the tool call self-describing in a transcript.</li>
-<li><strong>The empty-result guard</strong> is the one piece of real logic. A zero-row result would otherwise get back a cheerful <code>"render_in_client"</code>, and that is precisely the position in which a model is most likely to produce plausible-looking numbers — it has been told to draw something and given nothing to draw. Refusing outright is the fail-closed direction, consistent with the rest of the codebase. The cost, worth naming: an empty-state table can't be rendered through this tool, which is a genuine if minor loss.</li>
-<li>The <code>guidance</code> list is assembled rather than constant, so it can name <em>this</em> result — its id and its actual row count — and append a line about partial data when <code>truncated</code> is set. A model is measurably more likely to respect "use only the 8 rows already returned for qr_9f3c1ab2" than a generic instruction, because there is nothing left to interpret.</li>
-<li>Note what the truncation line asks for: <em>label the chart as a partial view</em>, not <em>fetch the rest</em>. The obvious phrasing would have pushed the model toward exactly the extra querying the tool exists to discourage. Worth reading the whole guidance list with that lens — each line is written to close a specific plausible misbehaviour.</li>
-<li>The lookup failure goes through <code>_fail</code> like every other anticipated error, so <code>QueryResultError</code>'s carefully-written text reaches the model. Same channel as <code>SecurityError</code> and <code>ConfirmationError</code>; the third client of that one function.</li>
+<li><strong>The rows are re-read, not passed in.</strong> This is the load-bearing line. There is no <code>rows</code> or <code>values</code> parameter, so a chart of numbers a model remembered, inferred from a profile, or read out of a <code>sample_table</code> peek is not <em>refused</em> — it is unreachable, because there is nowhere to put them. The earlier design achieved the same end with a paragraph of guidance asking the client to please use only the rows it already had. Re-running the statement turns that request into a property of the type signature.</li>
+<li>It costs an extra query. That is the honest price, and it is small: the statement was cheap enough to run interactively a moment ago, it is capped the same way, and it runs against the same read-only connection with the same authorizer. What it buys is that the picture cannot disagree with the database — including the case where the table was dropped in between, which now surfaces as a specific error rather than as a stale chart.</li>
+<li><code>validate_read_only_sql</code> runs <em>again</em> on a statement that already passed it once. Redundant by construction, kept anyway: the registry is in-memory state and the connection is a fresh one, so the validation belongs next to the execution rather than in the history of how the string got there.</li>
+<li><strong>The parameters came back, and that is a reversal worth naming.</strong> The previous version of this page argued that <code>visualize_data(query_result_id, intent=None)</code> was the whole design and that "the absent parameters are the feature" — that <code>x</code>, <code>y</code>, <code>chart_type</code> and <code>color</code> would be the server making decisions it could not make well. The reasoning was sound about <em>choosing</em>; it was wrong about <em>controlling</em>. Choosing axes is still the model's job, and it still does it by passing arguments informed by the user's question. What changed is what happens next: when the user says "make it wider" or "make that bar orange", there is now a matplotlib keyword for it. Without one, the only way to honour the request is to generate a fresh picture, and a picture generated to look like a chart is not tied to anything.</li>
+<li>That is the same trade the project makes everywhere else, one level up. Tabulite does not answer questions about your data; it hands the model <code>sqlite3</code> and lets it write SQL. It does not draw charts by imagination either; it hands the model matplotlib and lets it set parameters. In both cases the mature, deterministic library does the work and the model supplies the intent.</li>
+<li><code>intent</code> survived unchanged, and still changes nothing in the output. It exists so the goal travels with the reference rather than being reconstructed from context.</li>
+<li><strong>The empty-result guard</strong> is still the one piece of pure policy, and it now fires twice: once against the recorded row count, and again if the re-run comes back empty. A zero-row result is precisely the position in which a model is most likely to produce plausible-looking numbers — it has been told to draw something and given nothing to draw. Refusing outright is the fail-closed direction.</li>
+<li>The result is a <code>CallToolResult</code> built by hand rather than a returned dict, because it carries two things at once: an <code>ImageContent</code> block so the client can show the chart inline, and the structured payload describing what was drawn and where it was saved. A 600×380 PNG costs a few hundred tokens of context — cheaper than the table of numbers it replaces.</li>
 </ol>
 
 <h4><code>delete_table</code> — reading the shape</h4>
@@ -2261,7 +2346,7 @@ async def health(request: Request) -> JSONResponse:
 <li>Why does <code>QueryResultRegistry</code> store a result's columns and row count but not its rows? Name two problems the second copy would create.</li>
 <li>A confirmation token is 96 bits; a query result id is 32. Why is that not an inconsistency?</li>
 <li><code>ConfirmationRegistry</code> expires entries on a clock, <code>QueryResultRegistry</code> evicts them by count. What is it about each kind of entry that makes its policy the right one?</li>
-<li>What makes it structurally impossible for <code>visualize_data</code> to describe a query that never ran — and what does that guarantee still not cover?</li>
+<li><code>visualize_data</code> re-runs the recorded SQL instead of taking the rows as an argument. What does that make impossible, what does it cost, and what does the guarantee still not cover?</li>
 </ol>
 
 <h3>Two things to take with you</h3>
@@ -2270,7 +2355,7 @@ async def health(request: Request) -> JSONResponse:
 
 <p><strong>Preserve ambiguity until someone can resolve it.</strong> The importer stores everything as TEXT and refuses to guess. The profiler measures and reports evidence but changes nothing. The AI — with the user's question in hand — decides. Each layer does only what it can do correctly and hands the rest upward, so no layer is ever in the position of guessing on someone else's behalf.</p>
 
-<p class="footer">Written against <code>src/tabulite_mcp</code> at commit <code>6c2f770</code> · 2,689 lines across 12 modules · mcp 2.1.1, Python 3.11+</p>
+<p class="footer">Written against <code>src/tabulite_mcp</code> at commit <code>6c2f770</code> · 3,919 lines across 13 modules · mcp 2.1.1, matplotlib 3.8+, Python 3.11+</p>
 </section>
 
 </main>

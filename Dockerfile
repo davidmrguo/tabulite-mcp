@@ -6,7 +6,9 @@ ENV PYTHONUNBUFFERED=1 \
     TABULITE_SOURCE_DIR=/project/source \
     TABULITE_WORKSPACE_DIR=/project/workspace \
     TABULITE_HOST=0.0.0.0 \
-    TABULITE_PORT=8000
+    TABULITE_PORT=8000 \
+    MPLBACKEND=Agg \
+    MPLCONFIGDIR=/home/app/.cache/matplotlib
 
 WORKDIR /app
 
@@ -18,9 +20,13 @@ RUN pip install --no-cache-dir .
 # The project directory is bind-mounted at runtime; create the mount points and
 # hand them to the non-root user the server runs as.
 RUN useradd --create-home --uid 1000 app \
-    && mkdir -p /project/source /project/workspace \
-    && chown -R app:app /project
+    && mkdir -p /project/source /project/workspace /home/app/.cache/matplotlib \
+    && chown -R app:app /project /home/app/.cache
 USER app
+
+# Build matplotlib's font cache now rather than during the first chart request,
+# which would otherwise take several seconds and log a warning.
+RUN python -c "import matplotlib.font_manager"
 
 EXPOSE 8000
 

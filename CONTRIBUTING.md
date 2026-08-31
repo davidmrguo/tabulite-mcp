@@ -11,10 +11,16 @@ The server imports CSVs into SQLite and exposes read-only SQL to an AI client.
 That is the whole job.
 
 **Not in scope**, and not likely to become in scope: an embedded LLM,
-natural-language-to-SQL inside the server, arbitrary Python execution,
-pandas/NumPy/matplotlib, Excel, DuckDB, Polars or Parquet, embeddings or vector
-search, cloud deployment, authentication, multi-user support, background jobs.
-Your AI client is already the interface and the reasoning layer.
+natural-language-to-SQL inside the server, arbitrary Python execution, pandas or
+a DataFrame layer, dashboards or a BI tool, Excel, DuckDB, Polars or Parquet,
+embeddings or vector search, cloud deployment, authentication, multi-user
+support, background jobs. Your AI client is already the interface and the
+reasoning layer.
+
+Charting is the one thing that moved *into* scope, and it stays narrow:
+`visualize_data()` renders one matplotlib figure per query result, with every
+visual property as an explicit argument. A second chart type is a reasonable
+proposal; a dashboard is not.
 
 There are also no domain-specific tools. `query_sql()` exists so the assistant
 can answer questions nobody anticipated; a `top_products()` tool would be a step
@@ -39,7 +45,7 @@ TABULITE_SOURCE_DIR=./source TABULITE_WORKSPACE_DIR=./workspace tabulite-mcp
 ## Before you open a pull request
 
 ```bash
-pytest              # all 232 tests
+pytest              # all 276 tests
 ruff check src tests
 ```
 

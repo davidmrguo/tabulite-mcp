@@ -14,8 +14,8 @@ from tabulite_mcp.security import (
     quote_identifier,
     resolve_source_path,
     safe_table_name,
-    sanitize_export_filename,
-    unique_export_path,
+    sanitize_output_filename,
+    unique_output_path,
     validate_read_only_sql,
 )
 
@@ -112,9 +112,9 @@ def test_read_only_connection_refuses_writes_even_if_validation_is_bypassed(
 
 
 def test_sanitizes_export_filenames():
-    assert sanitize_export_filename("report", "csv") == "report.csv"
-    assert sanitize_export_filename("my report 2025.csv", "csv") == "my_report_2025.csv"
-    assert sanitize_export_filename("weird*name?.csv", "csv") == "weird_name_.csv"
+    assert sanitize_output_filename("report", "csv") == "report.csv"
+    assert sanitize_output_filename("my report 2025.csv", "csv") == "my_report_2025.csv"
+    assert sanitize_output_filename("weird*name?.csv", "csv") == "weird_name_.csv"
 
 
 @pytest.mark.parametrize(
@@ -123,16 +123,16 @@ def test_sanitizes_export_filenames():
 )
 def test_rejects_export_filename_traversal(bad_name: str):
     with pytest.raises(SecurityError):
-        sanitize_export_filename(bad_name, "csv")
+        sanitize_output_filename(bad_name, "csv")
 
 
-def test_unique_export_path_never_overwrites(config: Config):
-    first = unique_export_path(config.exports_dir, "result.csv")
+def test_unique_output_path_never_overwrites(config: Config):
+    first = unique_output_path(config.exports_dir, "result.csv")
     first.write_text("x")
-    second = unique_export_path(config.exports_dir, "result.csv")
+    second = unique_output_path(config.exports_dir, "result.csv")
     assert second.name == "result_2.csv"
     second.write_text("y")
-    assert unique_export_path(config.exports_dir, "result.csv").name == "result_3.csv"
+    assert unique_output_path(config.exports_dir, "result.csv").name == "result_3.csv"
 
 
 def test_identifier_helpers():

@@ -11,17 +11,23 @@ data.**
 Tabulite MCP — Tabulite for short — is a local
 [MCP](https://modelcontextprotocol.io) server. Point it at a folder of CSV
 files, and your desktop AI client can import them into SQLite, inspect what the
-columns actually contain, and answer questions by writing SQL — without a single
-row of your data leaving your machine or entering the conversation.
+columns actually contain, answer questions by writing SQL, and chart the
+answers with matplotlib — without a single row of your data leaving your
+machine or entering the conversation.
 
 ```
-Desktop AI client  →  MCP  →  Tabulite  →  sqlite3  →  your CSV files
-   (the reasoning)                (safe, deterministic tools)
+Desktop AI client  →  MCP  →  Tabulite ─┬→  sqlite3     →  your CSV files
+   (the reasoning)                      └→  matplotlib  →  workspace/charts/
+                             (safe, deterministic tools)
 ```
+
+Query first, then chart: matplotlib is only ever handed a result `sqlite3` just
+produced, never numbers the model supplied.
 
 There is no LLM inside the server. Your AI client does the thinking; Tabulite
-gives it metadata to think about, a read-only SQL interface to explore with, and
-a direct path to disk when the answer is a dataset rather than a sentence.
+gives it metadata to think about, a read-only SQL interface to explore with, a
+plotting library to draw the answer with, and a direct path to disk when the
+answer is a dataset rather than a sentence.
 
 ---
 
@@ -75,6 +81,20 @@ GROUP BY channel
 ORDER BY revenue DESC;
 ```
 
+Ask for a picture of that and it doesn't re-do the work — it charts the result
+it already has:
+
+> *"Chart that."*
+
+```python
+visualize_data(query_result_id="qr_9f3c1ab2", chart_type="bar",
+               title="Revenue by channel")
+```
+
+A 600px PNG comes back inline and lands in `workspace/charts/`. "Make it
+horizontal and highlight email" is another call with `chart_type="barh"` and
+`highlight="email"` — not a redrawn picture.
+
 ### Connect your AI client
 
 **Claude Code**
@@ -126,7 +146,7 @@ committed and the server can never modify them. Everything Tabulite creates
 | `sample_table(table_name, limit=20)` | a few rows, to see what the data looks like |
 | `query_sql(sql)` | read-only analytical SQL (capped at 1,000 rows), with a `query_result_id` |
 | `export_query(sql, file_name?, format="csv")` | complete result streamed to a file |
-| `visualize_data(query_result_id, intent?)` | ask the AI client to chart a result it already has — see below |
+| `visualize_data(query_result_id, chart_type?, x?, y?, ...)` | draw a chart of a query result with matplotlib — see below |
 | `delete_table(table_name, confirm?, confirmation_token?)` | permanently remove an imported table — two-step, see below |
 
 Notably absent: anything domain-specific. There is no `top_products()` or
@@ -264,62 +284,89 @@ path — this is the real result on the bundled sample data:
 Neither the server nor the conversation ever holds the whole result, so this
 works the same way at 58 rows or 5 million.
 
-### Charts are the client's job, not Tabulite's
+### Charts are drawn here, by matplotlib
 
-Tabulite renders nothing. There is no plotting library in here, no chart image,
-no HTML, no spec — and `visualize_data()` does not change that. It is a
-*semantic affordance*: a way for your assistant to notice that a result would
-read better as a picture, and to be told which result and what not to do about
-it.
+The same bargain as the SQL layer, one level up. Tabulite doesn't ask an AI to
+*imagine* a chart; it hands the AI a mature plotting library and lets it drive,
+exactly the way it hands over `sqlite3` instead of trying to answer questions
+about your data itself. Your assistant decides *what* to draw; matplotlib
+decides how a bar chart works.
 
-`query_sql()` now returns a `query_result_id` alongside the rows:
+`query_sql()` returns a `query_result_id` alongside the rows:
 
 ```json
 {"columns": ["month", "revenue"], "rows": [["2025-01", 125.4], ...],
  "returned_rows": 12, "truncated": false, "query_result_id": "qr_9f3c1ab2"}
 ```
 
-Pass that id back and you get a rendering brief, not a rendering:
+Pass that id to `visualize_data()` and you get a PNG back — as an image your
+client can show inline, and as a file on disk:
 
 ```json
-{"status": "render_in_client", "renderer": "ai_client",
+{"status": "rendered", "renderer": "matplotlib",
  "query_result_id": "qr_9f3c1ab2", "intent": "revenue trend by month",
- "source_result": {"produced_by": "query_sql", "columns": ["month", "revenue"],
-                   "returned_rows": 12, "truncated": false, "sql": "SELECT ..."},
- "guidance": ["Render this in the client...", "...do not re-query...", ...]}
+ "chart": {"file_name": "line_20260831T161204_a3f9c1.png",
+           "relative_path": "charts/line_20260831T161204_a3f9c1.png",
+           "chart_type": "line", "width_px": 600, "height_px": 360,
+           "x_column": "month", "y_columns": ["revenue"],
+           "plotted_rows": 12, "skipped_values": 0},
+ "source_result": {"sql": "SELECT ...", "returned_rows": 12}}
 ```
 
-Your client then draws the chart with whatever it already supports. The
-guidance exists to keep that step small and honest:
+Charts land in `workspace/charts/`, next to your exports, and an existing file
+is never overwritten.
 
-- **only the rows already returned** for that id are the source data — not the
-  table behind them, and not a second, wider query run to make the picture
-  richer;
-- **the simplest form that answers the question** — bar, line, scatter or a
-  plain table. Which columns become axes or series is inferred by the model
-  from the result and what you asked for, which is why this tool has no `x`,
-  `y`, `chart_type` or `color` arguments to get wrong;
-- **no dashboards and no standalone browser apps** unless you explicitly ask
-  for one;
-- if the result hit the 1,000-row cap, the brief says so and asks the client to
-  label the chart as a partial view rather than fetching more rows.
+**The data is not an argument.** There is no `rows` or `values` parameter to
+pass numbers into — `visualize_data()` takes an id and re-runs *that exact
+recorded statement* to get what it plots. A chart of numbers a model
+remembered, inferred from a profile, or read out of a sample isn't refused so
+much as unreachable: there is nowhere to put them. If you want a different
+picture, run a different query and visualize that result.
 
-The server keeps only the *shape* of recent results — the SQL, the column
-names, the row count — never the rows themselves; your client is already
-holding those. Those references are in-memory and bounded to the 32 most
-recent, so an id from a much earlier point in a long session, or from before a
-restart, comes back as a clear error telling the assistant to re-run the query
-rather than silently charting the wrong data.
+**Changing the chart is an argument, not a re-roll.** Ask for it wider, or
+green, or horizontal, or with the values printed on the bars, and your
+assistant calls the tool again with `width_px=`, `colors=`, `chart_type="barh"`
+or `value_labels=True`. Nothing is regenerated and nothing drifts — the same
+result and the same arguments always produce the same PNG, byte for byte. The
+knobs are `chart_type` (bar, barh, line, area, scatter, pie), `x` / `y`,
+`title`, `x_label`, `y_label`, `series_labels`, `width_px`, `height_px`,
+`theme`, `colors`, `highlight`, `legend`, `grid`, `stacked`, `value_labels` and
+`file_name`.
+
+Everything you *don't* pass is decided once, here, rather than improvised per
+chart:
+
+- **600px wide by default**, with the height that suits the form — a horizontal
+  bar chart grows with the number of bars, so its labels never crush together.
+- **A fixed eight-colour palette**, in a fixed order, checked for colour-vision
+  separation against both the light and the dark surface. It is never cycled
+  and a ninth hue is never invented: a ninth series is an error telling the
+  model to group the tail into an "Other" bucket in SQL instead.
+- **Thin marks, hairline gridlines, one baseline, a legend only when there are
+  two or more series.** Axis labels are *measured* and then rotated or thinned
+  until they clear each other, so you never get `2025-012025-02` along the
+  bottom.
+- **`highlight=` for emphasis** — the named categories take the accent colour
+  and the rest recede to grey, which is usually what "make X stand out" should
+  mean.
+
+**Values that aren't numbers are dropped, not zeroed.** The renderer converts
+with the same `TRY_REAL` rules the SQL layer uses, so the picture and the
+aggregate agree about what counts as a number. A row whose value won't convert
+gets no bar — never a bar of height zero — and the count comes back in
+`skipped_values` so your assistant can say so out loud. A group that is
+entirely missing shows as `(null)` rather than as an unlabelled bar.
 
 **No chart without a query.** A `query_result_id` is minted in exactly one
 place — inside `query_sql()`, after the SQL has passed validation and actually
 run. Nothing else issues one: not `sample_table()`, not `export_query()`, not a
 profile, and not a query that errored or was rejected as unsafe. Ids are not
-guessable, and `visualize_data()` has no "use the latest result" fallback, so
-the tool cannot return a rendering brief unless a real query produced a real
-result first. An empty result is refused outright rather than green-lit, since
-that is the one spot where a model might otherwise reach for plausible-looking
-numbers.
+guessable, and `visualize_data()` has no "use the latest result" fallback. The
+server keeps only the *shape* of recent results — the SQL, the column names,
+the row count — never the rows, and only the 32 most recent, so a stale id
+comes back as a clear error telling the assistant to re-run the query rather
+than silently charting the wrong data. An empty result is refused outright, and
+so is a result whose table has since been deleted.
 
 What that does *not* do is stop a client from drawing a chart without calling
 this tool at all — from a `sample_table()` peek, from a profile, or from
@@ -410,6 +457,7 @@ All optional; set them in `compose.yaml`.
 | `TABULITE_QUERY_TIMEOUT` | `30` | seconds before a query is canceled |
 | `TABULITE_EXPORT_TIMEOUT` | `600` | seconds before an export is canceled |
 | `TABULITE_BATCH_SIZE` | `5000` | rows per `executemany()` during import |
+| `TABULITE_CHART_WIDTH` | `600` | default chart width in pixels |
 | `TABULITE_HOST` / `TABULITE_PORT` | `0.0.0.0` / `8000` | bind address inside the container |
 | `TABULITE_ALLOWED_ORIGINS` | localhost origins | Origin allow-list (DNS-rebinding protection) |
 
@@ -423,7 +471,8 @@ tabulite-mcp/
 ├── workspace/               # everything generated (gitignored)
 │   ├── catalog.sqlite       #   source, import, profile and export metadata
 │   ├── databases/main.sqlite#   the imported analytical tables
-│   └── exports/             #   query results written to disk
+│   ├── exports/             #   query results written to disk
+│   └── charts/              #   rendered PNGs
 ├── src/tabulite_mcp/
 │   ├── server.py            # the MCP tools
 │   ├── config.py            # paths and limits
@@ -435,7 +484,8 @@ tabulite-mcp/
 │   ├── profiler.py          # logical type inference
 │   ├── casting.py           # TRY_* functions
 │   ├── catalog.py           # catalog.sqlite
-│   └── exporter.py          # streaming results to files
+│   ├── exporter.py          # streaming results to files
+│   └── charts.py            # matplotlib rendering
 ├── tests/
 ├── Dockerfile
 └── compose.yaml
@@ -459,20 +509,23 @@ Run the tests:
 pytest
 ```
 
-232 tests cover source discovery and traversal rejection, streamed import, NULL
+276 tests cover source discovery and traversal rejection, streamed import, NULL
 vs invalid handling, SHA-256 identity (including renamed and modified files),
 deterministic table naming, profiling and type inference, the `TRY_*` functions,
 `AVG` ignoring invalid values, SELECT/GROUP BY/CTE/join/window queries, result
 limits, query cancellation, read-only enforcement at both the scrubber and
 authorizer layers, CSV and JSON export, export streaming, filename sanitization,
-the two-step delete confirmation, and tool invocation over a real in-process
-MCP session.
+chart rendering (pixel dimensions, byte-for-byte determinism, dropped non-numeric
+values, the palette's limits), the two-step delete confirmation, and tool
+invocation over a real in-process MCP session.
 
-**Stack:** Python 3.11+, the standard library's `sqlite3`, and the official MCP
-Python SDK pinned at `mcp==2.1.1` (v2 API: `MCPServer`, host/port on `run()`).
-No pandas, no NumPy, no ORM — the core is recognizably ordinary Python:
-`sqlite3.connect()`, `conn.executemany()`, `conn.create_function()`,
-`cursor.fetchmany()`.
+**Stack:** Python 3.11+, the standard library's `sqlite3`, the official MCP
+Python SDK pinned at `mcp==2.1.1` (v2 API: `MCPServer`, host/port on `run()`),
+and matplotlib for chart rendering — which brings NumPy with it, the only
+transitive weight in the tree. No pandas, no DataFrame layer, no ORM: the data
+path is recognizably ordinary Python — `sqlite3.connect()`,
+`conn.executemany()`, `conn.create_function()`, `cursor.fetchmany()` — and
+NumPy is matplotlib's business, not something rows are ever loaded into.
 
 **Scale:** a 133 MB / 2,000,000-row CSV imports and profiles in about two
 minutes with container memory flat around 100 MB; aggregating over it takes a
@@ -503,11 +556,11 @@ re-run `import_source()`; the new content gets its own table.
 ## Not in scope
 
 No embedded LLM, no natural-language-to-SQL in the server, no arbitrary Python
-execution, no pandas/NumPy/matplotlib, no charting or BI layer (`visualize_data()`
-delegates that to your AI client), no Excel, DuckDB, Polars or Parquet, no
-embeddings or vector search, no cloud deployment, authentication, multi-user
-support or background jobs. Your AI client is already the interface and the
-reasoning layer.
+execution, no pandas or DataFrame layer, no dashboards or BI tool (charting
+stops at one matplotlib figure per query result), no Excel, DuckDB, Polars or
+Parquet, no embeddings or vector search, no cloud deployment, authentication,
+multi-user support or background jobs. Your AI client is already the interface
+and the reasoning layer.
 
 ## Contributing
 
