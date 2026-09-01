@@ -393,19 +393,19 @@ figcaption{
 <tr><td><strong>The authorizer callback</strong></td><td>A Python function SQLite calls <em>while compiling</em> each statement, once for every operation the statement intends to perform, which can veto that operation. Because it sees the compiled meaning rather than the text, it can't be fooled by how a query is spelled. It is what actually makes <code>query_sql</code> safe; the string scrubber in front of it is corroboration.</td><td><code>security.py</code></td></tr>
 <tr><td><strong>Autocommit mode</strong></td><td><code>sqlite3.connect(..., isolation_level=None)</code>. Python's <code>sqlite3</code> normally opens a transaction behind your back before any write and holds it until you commit. Setting <code>None</code> turns that off, so <code>BEGIN</code> and <code>COMMIT</code> mean exactly what they say and the importer controls its own boundaries.</td><td><code>database.py</code></td></tr>
 <tr><td><strong>The progress handler</strong></td><td>A callback SQLite invokes every N virtual-machine instructions; returning non-zero aborts the running statement. It is the only way to put a time limit on a query in this API, and it's why queries can be cancelled at all.</td><td><code>database.py</code></td></tr>
-<tr><td><strong>Tool docstrings are the API</strong></td><td>Every <code>@server.tool()</code> docstring is shipped verbatim to the language model as that tool's description. The prose is not documentation <em>about</em> the interface — it <em>is</em> the interface, and it's written to be acted on.</td><td><code>server.py</code></td></tr>
+<tr><td><strong>Tool docstrings are the API</strong></td><td>Every <code>@server.tool()</code> docstring is shipped verbatim to the language model as that tool's description. The prose is not documentation <em>about</em> the interface; it is the description the model works from.</td><td><code>server.py</code></td></tr>
 </tbody>
 </table>
 </div>
 
-<p>Two smaller conventions to note in passing. There is no schema migration system: <code>catalog.py</code> holds a <code>SCHEMA</code> string of <code>CREATE TABLE IF NOT EXISTS</code> statements re-run on every connect, which works because there is exactly one schema version in existence. And SQL identifiers cannot be bound as parameters — <code>SELECT * FROM ?</code> is not a thing — so every dynamic table and column name is interpolated through <code>quote_identifier()</code> instead, which is why that four-line function is load-bearing.</p>
+<p>Two smaller conventions to note in passing. There is no schema migration system: <code>catalog.py</code> holds a <code>SCHEMA</code> string of <code>CREATE TABLE IF NOT EXISTS</code> statements re-run on every connect, which works because there is exactly one schema version in existence. And SQL identifiers cannot be bound as parameters — <code>SELECT * FROM ?</code> is not a thing — so every dynamic table and column name is interpolated through <code>quote_identifier()</code> instead; that four-line function sits under every dynamic query in the codebase.</p>
 </section>
 
 <!-- ============================================================ -->
 <section id="order">
 <h2><span class="num">ORIENTATION</span>Reading order</h2>
 
-<p>The numbering below isn't decorative. It's a topological sort of the import graph: each module imports only modules that come before it, so you can read straight down and never meet an undefined name.</p>
+<p>The numbering below is a topological sort of the import graph: each module imports only modules that come before it, so you can read straight down and never meet an undefined name.</p>
 
 <figure>
 <div class="diagram-wrap">
@@ -477,7 +477,7 @@ figcaption{
 <figcaption>Six modules import nothing from the package at all. That flat base is why the test suite can exercise the security rules, the casting rules and the catalog schema without ever standing up a server.</figcaption>
 </figure>
 
-<p>Note what the graph <em>doesn't</em> contain: no module imports <code>server</code>, and no cycles. The MCP layer is a rind, not a spine — you could put a CLI or a Flask app on this same core and change nothing below <code>server.py</code>.</p>
+<p>Note what the graph <em>doesn't</em> contain: no module imports <code>server</code>, and no cycles. Nothing below <code>server.py</code> depends on the MCP layer, so a CLI or a Flask app could sit on the same core unchanged.</p>
 </section>
 
 <!-- ============================================================ -->
@@ -497,7 +497,7 @@ __version__ = "0.1.0"</code></pre>
 <p>Two things are happening here.</p>
 
 <ol class="notes">
-<li>The docstring states the architectural boundary. "The reasoning layer lives in the desktop AI client" is the sentence that justifies every later decision not to add cleverness to the server.</li>
+<li>The docstring states the architectural boundary. "The reasoning layer lives in the desktop AI client" is what the later decisions not to add analysis logic to the server follow from.</li>
 <li><code>__version__</code> is the single source of truth for the package version. <code>pyproject.toml</code> declares <code>dynamic = ["version"]</code> and points hatchling at this file — so bumping the string here is the entire release-version step, and <code>server.py</code> reads the same constant to report itself over MCP.</li>
 </ol>
 
@@ -541,7 +541,7 @@ class Config:
 <li><code>frozen=True</code> makes instances immutable and hashable. Nothing in the codebase needs the hashing, but the immutability means a <code>Config</code> can be passed six layers deep — into the importer, the profiler, the exporter — with no possibility that a callee mutates it out from under a caller.</li>
 <li>Every collection default is a <code>tuple</code>, not a <code>list</code>. Dataclasses reject mutable defaults outright, but the deeper reason is the same as above: <code>null_markers</code> travels into a tight per-cell loop in the importer and must not be something a caller can append to.</li>
 <li><code>read_chunk_bytes: int = 1 &lt;&lt; 20</code> is 1 MiB, written as a shift so the intent ("one megabyte") survives even though the value is a power of two. This is the buffer size for the <code>BufferedReader</code> in the import path.</li>
-<li>The comment on <code>max_query_rows</code> — <em>"exports are deliberately unbounded"</em> — is the load-bearing note in this file. Interactive queries are capped to protect the model's context window, not the server. Exports go to disk, where no context window exists, so they aren't capped at all. Two different limits for two different scarce resources.</li>
+<li>The comment on <code>max_query_rows</code> — <em>"exports are deliberately unbounded"</em> — explains the difference between the two limits. Interactive queries are capped to protect the model's context window, not the server. Exports go to disk, where no context window exists, so they aren't capped at all. Two different limits for two different scarce resources.</li>
 <li><code>query_timeout_seconds</code> is 30s and <code>export_timeout_seconds</code> is 600s for the same reason: an interactive call is blocking a conversation, an export is blocking a file.</li>
 <li><code>type_confidence_threshold: float = 0.99</code> — a column is called INTEGER only if 99% of its non-null values parse as integers. Not 100%, because real CSVs have a stray <code>"n/a"</code>; not 90%, because then the label would mislead.</li>
 </ol>
@@ -557,9 +557,9 @@ def database_path(self) -> Path:
     """
     return self.databases_dir / "main.sqlite"</code></pre>
 
-<p>This docstring is doing real architectural work, and it's worth pausing on because it's a genuine two-way door that was decided one way.</p>
+<p>This docstring records a real design decision, and it is worth pausing on.</p>
 
-<p>The obvious design is one SQLite file per imported CSV. It's tidier, deletion is <code>rm</code>, and there's no name-collision problem. It was rejected because joining two tables across two SQLite files requires <code>ATTACH DATABASE</code> — and <code>ATTACH</code> is exactly the statement the read-only authorizer denies, since it's how you'd read a file the server never meant to expose. So: <strong>one database file, so that joins work, so that <code>ATTACH</code> can stay banned.</strong> The price is paid later, in <code>importer.deterministic_table_name()</code>, which now has to resolve name collisions.</p>
+<p>The obvious design is one SQLite file per imported CSV. It's tidier, deletion is <code>rm</code>, and there's no name-collision problem. It was rejected because joining two tables across two SQLite files requires <code>ATTACH DATABASE</code> — and <code>ATTACH</code> is exactly the statement the read-only authorizer denies, since it's how you'd read a file the server never meant to expose. So: <strong>one database file, which keeps joins possible and lets <code>ATTACH</code> stay banned.</strong> The price is paid later, in <code>importer.deterministic_table_name()</code>, which now has to resolve name collisions.</p>
 
 <div class="aside">
 <span class="tag">Reading the trade</span>
@@ -602,14 +602,14 @@ default_origins = tuple(f"http://{h}" for h in default_hosts)</code></pre>
 <!-- ============================================================ -->
 <section id="m3">
 <h2><span class="num">MODULE 3</span><code>casting.py</code></h2>
-<p class="deps"><b>imports:</b> <code>re</code>, <code>sqlite3</code>, <code>datetime</code> &nbsp;·&nbsp; <b>job:</b> five SQL functions that refuse to guess</p>
+<p class="deps"><b>imports:</b> <code>re</code>, <code>sqlite3</code>, <code>datetime</code> &nbsp;·&nbsp; <b>job:</b> five SQL functions that return NULL instead of guessing</p>
 
 <p>This module exists because of one SQLite behaviour, stated at the top of the file:</p>
 
 <pre><code>CAST('12 apples' AS REAL)  -->  12.0
 CAST('unknown'   AS REAL)  -->  0.0</code></pre>
 
-<p>The second line is the dangerous one. SQLite's <code>CAST</code> never fails; it returns <code>0.0</code> for anything it can't parse. So <code>AVG(CAST(price AS REAL))</code> over a column where 30% of rows say <code>"unknown"</code> silently reports a number that is 30% too low — and nothing anywhere signals that it happened. The AI writes plausible SQL, gets a plausible number, and reports a wrong answer confidently.</p>
+<p>The second line is the dangerous one. SQLite's <code>CAST</code> never fails; it returns <code>0.0</code> for anything it can't parse. So <code>AVG(CAST(price AS REAL))</code> over a column where 30% of rows say <code>"unknown"</code> reports a number that is 30% too low, and nothing signals that it happened. The SQL is valid and the number looks reasonable, so it gets reported as the answer.</p>
 
 <p>The fix is a set of functions that return <strong>NULL</strong> instead of zero, because SQL aggregates skip NULLs by definition. <code>AVG(TRY_REAL(price))</code> averages only the parseable rows, and <code>COUNT(TRY_REAL(price))</code> tells you how many those were.</p>
 
@@ -633,10 +633,10 @@ CAST('unknown'   AS REAL)  -->  0.0</code></pre>
     return text or None</code></pre>
 
 <ol class="notes">
-<li>The <code>bool</code> check must come <strong>before</strong> the <code>(int, float)</code> check. In Python <code>bool</code> is a subclass of <code>int</code>, so <code>isinstance(True, int)</code> is <code>True</code> — reorder these two lines and <code>True</code> becomes the string <code>"True"</code> instead of <code>"1"</code>, and <code>TRY_INTEGER(True)</code> starts returning NULL. A classic ordering bug, avoided.</li>
+<li>The <code>bool</code> check must come <strong>before</strong> the <code>(int, float)</code> check. In Python <code>bool</code> is a subclass of <code>int</code>, so <code>isinstance(True, int)</code> is <code>True</code> — reorder these two lines and <code>True</code> becomes the string <code>"True"</code> instead of <code>"1"</code>, and <code>TRY_INTEGER(True)</code> starts returning NULL.</li>
 <li>SQLite can hand a Python function any of its five storage classes. This function collapses all of them to "a trimmed string or nothing", so the five <code>try_*</code> functions below can each be a single regex or <code>strptime</code> call and don't repeat this ladder.</li>
 <li><code>bytes</code> appear when a BLOB is stored, or when text was inserted as bytes. Undecodable bytes return <code>None</code> rather than raising — a Python exception inside a SQLite callback surfaces as an opaque error mid-query, which would be a bad experience for a caller trying to debug their SQL.</li>
-<li><code>return text or None</code> — the final trick. A whitespace-only cell strips to <code>""</code>, which is falsy, so it becomes <code>None</code>. This means <code>"   "</code> is treated as missing, not as an unparseable value.</li>
+<li><code>return text or None</code>: a whitespace-only cell strips to <code>""</code>, which is falsy, so it becomes <code>None</code>. This means <code>"   "</code> is treated as missing, not as an unparseable value.</li>
 </ol>
 
 <h4>The two regexes</h4>
@@ -646,7 +646,7 @@ _REAL_RE    = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")</code></p
 
 <ol class="notes">
 <li>Both are anchored at both ends. <code>"12 apples"</code> fails, which is the entire point — an unanchored pattern would reproduce the exact <code>CAST</code> bug this module exists to avoid.</li>
-<li><code>_REAL_RE</code> accepts <code>1.</code> (via <code>\d+(\.\d*)?</code>) and <code>.5</code> (via <code>\.\d+</code>) and scientific notation, but <strong>not</strong> thousands separators, currency symbols, or parenthesised negatives. <code>"1,234.50"</code> and <code>"$99"</code> are NULL. That's a real limitation, and it's the honest one: the profiler will report those columns as TEXT with a low confidence, which is a truthful signal that the data needs cleaning, rather than a silently half-right number.</li>
+<li><code>_REAL_RE</code> accepts <code>1.</code> (via <code>\d+(\.\d*)?</code>) and <code>.5</code> (via <code>\.\d+</code>) and scientific notation, but <strong>not</strong> thousands separators, currency symbols, or parenthesised negatives. <code>"1,234.50"</code> and <code>"$99"</code> are NULL. That's a real limitation. The profiler reports those columns as TEXT with a low confidence, which signals that the data needs cleaning rather than producing a silently half-right number.</li>
 <li><code>\d</code> in Python 3 <code>re</code> matches Unicode digits by default — Arabic-Indic numerals would pass the regex and then <code>int()</code> would accept them too. Consistent, if unlikely to come up.</li>
 </ol>
 
@@ -700,7 +700,7 @@ _REAL_RE    = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")</code></p
 <h2><span class="num">MODULE 4</span><code>security.py</code></h2>
 <p class="deps"><b>imports:</b> <code>logging</code>, <code>re</code>, <code>sqlite3</code>, <code>pathlib</code> &nbsp;·&nbsp; <b>job:</b> two containment problems — filesystem and SQL</p>
 
-<p>The biggest module that isn't the server, and the one where reading every line pays off most. It answers two questions: <em>can this path escape the project directory?</em> and <em>can this statement do anything but read?</em></p>
+<p>The biggest module that isn't the server. It answers two questions: <em>can this path escape the project directory?</em> and <em>can this statement do anything but read?</em></p>
 
 <h3>Part one: paths</h3>
 
@@ -711,10 +711,10 @@ _REAL_RE    = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")</code></p
         raise SecurityError(f"path escapes the allowed directory: {candidate}")
     return resolved</code></pre>
 
-<p>Four lines, and the ordering is the whole security property.</p>
+<p>Four lines, and the ordering is what makes them work.</p>
 
 <ol class="notes">
-<li><strong><code>.resolve()</code> happens before the check, not after.</strong> This is the non-negotiable part. <code>resolve()</code> normalizes <code>..</code> segments <em>and</em> follows symlinks. Checking containment on the unresolved path would let <code>source/innocent.csv</code> be a symlink to <code>/etc/passwd</code> and pass. Because resolution comes first, the comparison is between two real, canonical filesystem locations.</li>
+<li><strong><code>.resolve()</code> happens before the check, not after.</strong> <code>resolve()</code> normalizes <code>..</code> segments <em>and</em> follows symlinks. Checking containment on the unresolved path would let <code>source/innocent.csv</code> be a symlink to <code>/etc/passwd</code> and pass. Because resolution comes first, the comparison is between two real, canonical filesystem locations.</li>
 <li><code>base_resolved not in resolved.parents</code> — <code>Path.parents</code> is a sequence of every ancestor, so this is a true ancestry test. The naive alternative, <code>str(resolved).startswith(str(base))</code>, has a classic hole: <code>/project/source-evil/x.csv</code> starts with <code>/project/source</code> and would pass. Ancestry testing doesn't have that hole.</li>
 <li>The <code>resolved != base_resolved</code> disjunct handles the base directory itself, which is not in its own <code>parents</code>. Needed by <code>unique_export_path</code>.</li>
 <li>A subtle consequence: <code>resolve()</code> on a nonexistent path is fine in Python 3.6+ (it doesn't raise), so the existence checks in the caller are separate concerns and can produce their own, clearer errors.</li>
@@ -741,7 +741,7 @@ _REAL_RE    = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")</code></p
     return resolved</code></pre>
 
 <ol class="notes">
-<li><strong>The null-byte check.</strong> This is the one that looks paranoid and isn't. C string handling terminates at <code>\0</code>, so <code>"safe.csv\x00/../../etc/passwd"</code> can be validated by Python as one string and interpreted by a C library as another. Python's own <code>open()</code> raises <code>ValueError</code> on embedded nulls, so this check is mostly about producing a clear error instead of a confusing one — but it costs nothing and closes a whole class of confusion.</li>
+<li><strong>The null-byte check.</strong> C string handling terminates at <code>\0</code>, so <code>"safe.csv\x00/../../etc/passwd"</code> can be validated by Python as one string and interpreted by a C library as another. Python's own <code>open()</code> raises <code>ValueError</code> on embedded nulls, so this check is mostly about producing a clear error instead of a confusing one — and it costs nothing.</li>
 <li><strong>Absolute paths are accepted, conditionally.</strong> This looks like a weakening but it's a usability fix with the security preserved: <code>list_sources()</code> returns paths, an AI client may echo one back verbatim, and rejecting them outright would produce a baffling error. They're accepted only if they resolve <em>inside</em> <code>source_dir</code>, which <code>_resolve_inside</code> enforces regardless.</li>
 <li><strong>The <code>".." in candidate.parts</code> check is redundant</strong> — <code>_resolve_inside</code> would catch <code>source/../../etc</code> anyway, after resolution. It's there for the error message. "path traversal is not allowed" tells a caller what they did wrong; "path escapes the allowed directory" tells them the outcome. For a caller that is a language model trying to self-correct, the specific message is meaningfully better.</li>
 <li>Note the asymmetry: the <code>..</code> check runs only on the relative branch. That's correct — an absolute path containing <code>..</code> still gets resolved and containment-checked, so nothing leaks.</li>
@@ -760,7 +760,7 @@ _REAL_RE    = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")</code></p
 
 <ol class="notes">
 <li>Three explicit rejections come first — null bytes, any separator, any <code>..</code>. Only then does the regex scrub. The rejections are <em>hard errors</em> rather than silent scrubbing because a caller asking for <code>../../x.csv</code> has a mistaken model of what this tool does, and quietly writing <code>______x.csv</code> would hide that.</li>
-<li><code>_FILENAME_SAFE = re.compile(r"[^0-9a-zA-Z._-]+")</code> is an <strong>allowlist</strong>, expressed as a negated character class. Denylists of dangerous characters always miss something; this can't. Spaces, quotes, semicolons, emoji, RTL override characters all become <code>_</code>.</li>
+<li><code>_FILENAME_SAFE = re.compile(r"[^0-9a-zA-Z._-]+")</code> is an <strong>allowlist</strong>, expressed as a negated character class. Denylists of dangerous characters tend to miss something; an allowlist doesn't. Spaces, quotes, semicolons, emoji, RTL override characters all become <code>_</code>.</li>
 <li><code>.strip("._")</code> removes leading and trailing dots and underscores — a leading dot would make the export a hidden file, and the earlier <code>..</code> guard already ran, so this is about tidiness rather than safety.</li>
 <li>The suffix is appended only if absent, so <code>report.csv</code> stays <code>report.csv</code> rather than becoming <code>report.csv.csv</code>. The <code>.lower()</code> means <code>REPORT.CSV</code> is also left alone.</li>
 </ol>
@@ -800,7 +800,7 @@ _REAL_RE    = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")</code></p
 
 <ol class="notes">
 <li>Parameter binding (<code>?</code>) works for <em>values</em> only. You cannot write <code>SELECT * FROM ?</code> — SQL identifiers are resolved at compile time, before parameters are bound. So dynamic table and column names must be interpolated, and the only safe way to interpolate is to quote them correctly.</li>
-<li>SQLite's rule for double-quoted identifiers is that an embedded <code>"</code> is escaped by doubling it. <code>replace('"', '""')</code> implements exactly that, so a column literally named <code>we"rd</code> becomes <code>"we""rd"</code> and parses as one identifier. There is no escape sequence that can break out of a doubled-quote identifier — which is why this is sufficient and not merely a filter.</li>
+<li>SQLite's rule for double-quoted identifiers is that an embedded <code>"</code> is escaped by doubling it. <code>replace('"', '""')</code> implements exactly that, so a column literally named <code>we"rd</code> becomes <code>"we""rd"</code> and parses as one identifier. There is no escape sequence that breaks out of a doubled-quote identifier, so this is sufficient on its own rather than a filter.</li>
 <li>Combined with <code>safe_table_name()</code> below, the codebase actually has two independent protections: names are normalized to <code>[a-z0-9_]</code> on the way in, <em>and</em> quoted on the way into SQL. Either alone would do; both means a future code path that skips normalization still can't inject.</li>
 </ol>
 
@@ -824,7 +824,7 @@ _REAL_RE    = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")</code></p
 
 <h3>Part two: SQL</h3>
 
-<p>Now the interesting half. Read the module docstring's framing first — the layering claim is the thesis, and the code below has to earn it.</p>
+<p>The second half of the module. Read the module docstring's framing first: it claims a layering, and the code below is what implements it.</p>
 
 <h4>The scrubber</h4>
 
@@ -865,7 +865,7 @@ _REAL_RE    = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")</code></p
 <ol class="notes">
 <li>Without it, keyword scanning is trivially defeated: <code>SELECT 'DROP TABLE users' AS note</code> contains the token <code>DROP</code> but is a perfectly innocent query. Conversely <code>SELECT 1 --\nDROP</code> hides a real one behind a comment. Both are neutralized by blanking those regions before scanning.</li>
 <li>The four quote characters are all of SQLite's identifier and literal delimiters: <code>'</code> for strings, <code>"</code> standard identifiers, <code>`</code> MySQL-style, <code>[...]</code> SQL-Server-style. SQLite accepts all four for compatibility, so all four must be handled or one becomes a hiding place.</li>
-<li><strong>The replacement differs by kind, and this is the cleverest line in the function.</strong> A string literal becomes a space; an identifier becomes <code>_</code>. Why: identifiers are <em>tokens</em> that must survive so the statement's shape is preserved, whereas string content is pure noise. Concretely, this is what lets a table with a column literally named <code>"drop"</code> be queried — the identifier collapses to <code>_</code>, so the keyword scan never sees <code>DROP</code>, but the token still holds its place in <code>SELECT _ FROM t</code>.</li>
+<li><strong>The replacement differs by kind.</strong> A string literal becomes a space; an identifier becomes <code>_</code>. Why: identifiers are <em>tokens</em> that must survive so the statement's shape is preserved, whereas string content is pure noise. Concretely, this is what lets a table with a column literally named <code>"drop"</code> be queried — the identifier collapses to <code>_</code>, so the keyword scan never sees <code>DROP</code>, but the token still holds its place in <code>SELECT _ FROM t</code>.</li>
 <li><code>closing != "]"</code> guards the doubled-quote rule, because <code>]]</code> is not an escape in bracket syntax — only quote characters double. Getting this wrong would mis-parse <code>[a]]b]</code>.</li>
 <li>Unterminated constructs fail closed by design: an unclosed <code>'</code> runs <code>j</code> to <code>n</code>, and everything after it is swallowed. The scrubbed output then has no valid leading keyword or becomes empty, and validation rejects it. An unterminated <code>--</code> comment hits <code>break</code> and truncates. In both cases the result is "reject", never "accept the tail".</li>
 <li>The <code>-</code>/<code>/</code> branches use <code>sql.startswith("--", i)</code> rather than peeking at <code>sql[i+1]</code>, which avoids an index error at the last character. Small, but the kind of thing that bites in hand-written scanners.</li>
@@ -906,14 +906,14 @@ _REAL_RE    = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")</code></p
     return stripped</code></pre>
 
 <ol class="notes">
-<li><strong>The statement is validated scrubbed but returned <em>stripped</em>.</strong> Read that twice — it's the crux. The scrubbed text is analysis material only; what actually executes is the caller's original SQL. Executing the scrubbed version would be nonsense (all the string literals are gone). This is why the scrubber can afford to be lossy.</li>
+<li><strong>The statement is validated scrubbed but returned <em>stripped</em>.</strong> The scrubbed text is analysis material only; what actually executes is the caller's original SQL. Executing the scrubbed version would be nonsense (all the string literals are gone). This is why the scrubber can afford to be lossy.</li>
 <li>Splitting on <code>;</code> happens <em>after</em> scrubbing, so a semicolon inside a string literal has already been blanked and can't fake a multi-statement error — and conversely, a real second statement can't hide inside a comment. Empty parts are filtered, so a single trailing <code>;</code> is accepted.</li>
 <li>The single-statement rule matters even though Python's <code>sqlite3.execute()</code> already refuses multiple statements: it gives the AI a clear, actionable message instead of <code>Warning: You can only execute one statement at a time</code>.</li>
 <li>Tokenizing with <code>[A-Za-z_][A-Za-z_0-9]*</code> means <code>DROP</code> inside <code>DROPPED</code> is one token and doesn't match — a plain substring search would have thrown false positives on column names like <code>update_time</code> and <code>deleted_at</code>, which appear constantly in real data.</li>
-<li>Allowed openers are <code>SELECT</code>, <code>WITH</code>, <code>VALUES</code>. <code>WITH</code> is essential — CTEs are how a model writes readable multi-step analysis. And <code>WITH</code> is precisely why the <em>whole token stream</em> is scanned rather than only the first word: <code>WITH x AS (SELECT 1) DELETE FROM t</code> opens legally and ends badly.</li>
+<li>Allowed openers are <code>SELECT</code>, <code>WITH</code>, <code>VALUES</code>. <code>WITH</code> is essential — CTEs are how a model writes readable multi-step analysis. And <code>WITH</code> is precisely why the <em>whole token stream</em> is scanned rather than only the first word: <code>WITH x AS (SELECT 1) DELETE FROM t</code> opens with an allowed keyword and then writes.</li>
 <li><strong><code>REPLACE</code> is the one context-sensitive case</strong> and gets its own set. It's both a mutating statement (<code>REPLACE INTO</code>) and an entirely ordinary string function (<code>replace(name, 'a', 'b')</code>). The discriminator — <code>scrubbed[match.end():].lstrip().startswith("(")</code> — is "is the next non-space character an open paren?" A function call always has one; <code>REPLACE INTO</code> never does. The <code>lstrip()</code> is doing real work: <code>replace (x, y, z)</code> with a space is legal SQL.</li>
-<li><code>_FORBIDDEN_FUNCTIONS</code> is matched case-<em>sensitively</em> via <code>token.lower()</code> against a lowercase set — so it catches <code>LOAD_EXTENSION</code>, <code>Load_Extension</code>, and <code>readfile</code> alike. These are the CLI-shell functions that touch the filesystem; most builds don't have them, but "most" isn't a security property.</li>
-<li><strong>The comment above <code>_FORBIDDEN_KEYWORDS</code> — <em>"Belt-and-braces list; the authorizer is what actually enforces read-only"</em> — is the most important comment in the file.</strong> It tells the next maintainer not to treat this list as the security boundary and not to panic if it's incomplete. Every keyword denylist is incomplete; that's why it isn't the mechanism.</li>
+<li><code>_FORBIDDEN_FUNCTIONS</code> is matched case-<em>sensitively</em> via <code>token.lower()</code> against a lowercase set — so it catches <code>LOAD_EXTENSION</code>, <code>Load_Extension</code>, and <code>readfile</code> alike. These are the CLI-shell functions that touch the filesystem; most builds don't have them, but not all.</li>
+<li><strong>The comment above <code>_FORBIDDEN_KEYWORDS</code></strong> — <em>"Belt-and-braces list; the authorizer is what actually enforces read-only"</em> — tells the next maintainer not to treat this list as the security boundary and not to panic if it's incomplete. Every keyword denylist is incomplete; that's why it isn't the mechanism.</li>
 </ol>
 
 <h4>The authorizer — the actual mechanism</h4>
@@ -938,24 +938,24 @@ def _authorizer(action, arg1, arg2, db_name, trigger) -> int:
     logger.warning("denied SQLite operation: %s", describe_action(action))
     return sqlite3.SQLITE_DENY</code></pre>
 
-<p>Fifteen lines that do more security work than the previous two hundred. Here is what's actually happening:</p>
+<p>Fifteen lines, and this is where read-only is actually enforced.</p>
 
 <ol class="notes">
 <li>SQLite invokes this callback <strong>during statement compilation</strong>, once for every operation the compiled program will perform — each table read, each column read, each function call, each schema change. Returning <code>SQLITE_DENY</code> makes <code>prepare</code> fail, so the statement never runs at all. Nothing partial executes.</li>
 <li>Because it operates on the <em>compiled semantics</em>, not the text, it cannot be fooled by spelling. Unicode homoglyphs, nested comments, weird quoting, a syntax you didn't anticipate — none of it matters. If the statement would perform a write, SQLite tells the callback it's about to perform a write.</li>
-<li><strong>Deny by default.</strong> The final <code>return SQLITE_DENY</code> means an action code that didn't exist when this was written — some future SQLite version's new operation — is denied automatically. An allowlist that fails closed is the only kind worth having.</li>
+<li><strong>Deny by default.</strong> The final <code>return SQLITE_DENY</code> means an action code that didn't exist when this was written — some future SQLite version's new operation — is denied automatically.</li>
 <li><code>SQLITE_READ</code> is allowed for <em>all</em> tables and columns, including <code>sqlite_master</code>. That's deliberate: the AI needs to introspect the schema, and there's nothing in this database it isn't already allowed to query.</li>
 <li><code>SQLITE_RECURSIVE</code> is a separate action code covering recursive CTE steps. Omitting it would break <code>WITH RECURSIVE</code>, which is a legitimate analytical tool. Its presence in the allowlist is a deliberate capability grant, not an oversight.</li>
 <li>The <code>SQLITE_FUNCTION</code> branch is checked first and separately because it's the one action that needs to look at its argument. <code>arg2</code> holds the function name. Everything registered on the connection is pure, so the check is only against the builtin denylist.</li>
 <li>The callback returns <code>SQLITE_DENY</code>, not <code>SQLITE_IGNORE</code>. The distinction matters: <code>IGNORE</code> makes the operation silently return NULL and the query <em>succeeds with wrong data</em>. <code>DENY</code> raises. For a caller that will report the result as an answer, a silent wrong number is far worse than an error.</li>
-<li><code>_NAMED_DENIALS</code> is <strong>not</strong> the deny list — deny-by-default already covers every one of those codes. It's a lookup table from action code to human name, used only by <code>describe_action()</code> for the log line and the error. The comment says exactly this, and it's worth trusting: deleting the whole dict would change no behaviour except message quality.</li>
+<li><code>_NAMED_DENIALS</code> is <strong>not</strong> the deny list — deny-by-default already covers every one of those codes. It's a lookup table from action code to human name, used only by <code>describe_action()</code> for the log line and the error. The comment says as much: deleting the dict would change no behaviour except message quality.</li>
 <li>Every denial is logged at WARNING. On a local single-user server this is a debugging aid rather than an audit trail, but it's how you'd find out that a client is repeatedly trying something it shouldn't.</li>
 </ol>
 
 <div class="aside">
 <span class="tag">Advisory vs enforced</span>
 <p>Most "read-only" arrangements in application code are <em>advisory</em>: a wrapper, a routing rule, a connection you are expected to use. They work by convention and there is always a way around them, because the restriction lives in the same layer as the code being restricted.</p>
-<p>The authorizer is enforced one layer down, inside SQLite's own statement compiler, where application code cannot reach. There is no equivalent of "use the other connection" — the denial happens after the SQL has been parsed and before it can run, and nothing above it gets a vote.</p>
+<p>The authorizer is enforced one layer down, inside SQLite's own statement compiler, where application code cannot reach. There is no equivalent of "use the other connection" — the denial happens after the SQL has been parsed and before it can run, and no code above it can override it.</p>
 </div>
 
 <pre><code>def disable_extension_loading(conn: sqlite3.Connection) -> None:
@@ -974,7 +974,7 @@ def _authorizer(action, arg1, arg2, db_name, trigger) -> int:
 <ol class="notes">
 <li>Two switches, because they're different switches. <code>enable_load_extension</code> controls the Python-level <code>load_extension()</code> method; <code>SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION</code> controls the SQL-level <code>load_extension()</code> function at the C level. Belt and braces on the highest-consequence capability in the file — a loaded extension is arbitrary native code in-process, past every layer above.</li>
 <li>Both are wrapped because both are <em>optional</em>. <code>enable_load_extension</code> is absent entirely if Python's <code>sqlite3</code> was built without extension support (common on Linux distro packages), and <code>setconfig</code> only exists on Python 3.12+ while <code>pyproject.toml</code> supports 3.11. The <code>getattr(..., None)</code> is the version guard.</li>
-<li>The bare <code>pass</code> with a comment is the right call and the comment earns it: if the API is missing, the capability is missing, so failure to disable it is not a failure. Without the comment this would read as swallowed errors.</li>
+<li>The bare <code>pass</code> is right here, and the comment carries the reason: if the API is missing, the capability is missing, so failure to disable it is not a failure. Without the comment this would read as swallowed errors.</li>
 </ol>
 </section>
 
@@ -997,10 +997,10 @@ def _authorizer(action, arg1, arg2, db_name, trigger) -> int:
     return conn</code></pre>
 
 <ol class="notes">
-<li><strong><code>isolation_level=None</code> is autocommit mode</strong>, and it's the single most consequential argument here. By default, Python's <code>sqlite3</code> module implicitly opens a transaction before any DML and leaves it open until you call <code>commit()</code> — a legacy behaviour that surprises people constantly. Setting it to <code>None</code> turns that off: statements run immediately, and <code>BEGIN</code>/<code>COMMIT</code> mean what they say. The importer relies on this to wrap exactly its insert loop in one transaction and nothing else.</li>
+<li><strong><code>isolation_level=None</code> is autocommit mode</strong>, and it is the argument that changes the most here. By default, Python's <code>sqlite3</code> module implicitly opens a transaction before any DML and leaves it open until you call <code>commit()</code> — a legacy behaviour that surprises people. Setting it to <code>None</code> turns that off: statements run immediately, and <code>BEGIN</code>/<code>COMMIT</code> mean what they say. The importer relies on this to wrap exactly its insert loop in one transaction and nothing else.</li>
 <li><code>check_same_thread=False</code>: the MCP SDK runs sync tool functions in an anyio worker thread, and the thread isn't guaranteed to be the one that imported the module. Since every connection here is created and closed inside a single tool call, it never actually crosses threads — this flag just stops <code>sqlite3</code>'s conservative guard from firing on a false positive.</li>
 <li><code>journal_mode=WAL</code> is a <em>persistent</em> property written into the database file, not a per-connection setting — running it on every connect is idempotent and cheap. WAL lets one writer and many readers coexist, which is what makes the read-only connection usable while an import is in flight.</li>
-<li><code>synchronous=NORMAL</code> (rather than the default <code>FULL</code>) skips an <code>fsync</code> per commit. Under WAL the durability cost is bounded: you can lose the most recent transactions on an OS crash or power loss, but the database <em>cannot</em> corrupt. For a local analysis tool whose source of truth is a CSV file sitting right there, that's an obviously correct trade — a lost import is re-runnable.</li>
+<li><code>synchronous=NORMAL</code> (rather than the default <code>FULL</code>) skips an <code>fsync</code> per commit. Under WAL the durability cost is bounded: you can lose the most recent transactions on an OS crash or power loss, but the database <em>cannot</em> corrupt. For a local analysis tool whose source of truth is a CSV file sitting right there, that's a sensible trade: a lost import can be re-run.</li>
 <li>The last two calls apply the security and casting decorations. Order matters here only in that both must happen before any user SQL runs.</li>
 </ol>
 
@@ -1018,13 +1018,13 @@ def _authorizer(action, arg1, arg2, db_name, trigger) -> int:
     install_read_only_authorizer(conn)
     return conn</code></pre>
 
-<p><strong>The order of these five lines is the security property.</strong> The docstring says so and it is not being modest.</p>
+<p><strong>The order of these five lines is the security property.</strong> The docstring says so.</p>
 
 <ol class="notes">
 <li><code>path.resolve().as_uri()</code> produces a correctly percent-encoded <code>file://</code> URI. Hand-building <code>f"file:{path}?mode=ro"</code> breaks on spaces and on Windows drive letters — and worse, a <code>?</code> or <code>#</code> in the path would be parsed as a URI delimiter and silently change the query parameters. <code>as_uri()</code> handles all of it.</li>
 <li><code>mode=ro</code> requires <code>uri=True</code>; without that flag the whole string is treated as a literal filename and you'd get a file named <code>file:///...?mode=ro</code>. Silent and confusing.</li>
-<li><strong><code>PRAGMA query_only=ON</code> must run before the authorizer is installed</strong> — because the authorizer denies <code>SQLITE_PRAGMA</code>. Install them the other way round and your own hardening pragma is rejected by your own hardening. This is a genuinely easy mistake and the comment in the source calls it out.</li>
-<li>Which means the sequence is self-consistent in one direction only: OS-level lock, then engine-level lock, then extensions off, then functions registered (also a pre-authorizer operation), then the authorizer, which locks the door behind itself.</li>
+<li><strong><code>PRAGMA query_only=ON</code> must run before the authorizer is installed</strong> — because the authorizer denies <code>SQLITE_PRAGMA</code>. Install them the other way round and the pragma is rejected by the authorizer. The comment in the source calls this out.</li>
+<li>Which means the sequence only works in one direction: OS-level lock, then engine-level lock, then extensions off, then functions registered (also a pre-authorizer operation), then the authorizer last.</li>
 <li>The <code>FileNotFoundError</code> guard exists because <code>mode=ro</code> does <em>not</em> create a missing file — it fails with an unhelpful "unable to open database file". The explicit check gives a message that says what to do.</li>
 </ol>
 
@@ -1062,7 +1062,7 @@ def column_names(conn, table_name) -> list[str]:
     cursor = conn.execute(f"SELECT * FROM {quote(table_name)} LIMIT 0")
     return [d[0] for d in cursor.description or []]</code></pre>
 
-<p>This pair is my favourite thing in the module, because it's a direct, visible consequence of a decision made two files ago.</p>
+<p>This pair is a direct consequence of a decision made two files ago.</p>
 
 <ol class="notes">
 <li>The authorizer denies <code>SQLITE_PRAGMA</code> without exception. So the natural way to introspect a table — <code>PRAGMA table_info</code> — simply doesn't work on the connection the AI uses. Rather than punching a hole in the authorizer for one pragma, the code finds another way.</li>
@@ -1119,7 +1119,7 @@ if truncated:
     rows = rows[:max_rows]</code></pre>
 
 <ol class="notes">
-<li><strong><code>fetchmany(max_rows + 1)</code> — the plus one is the whole trick.</strong> Fetch exactly the cap and you cannot distinguish "there were exactly 1,000 rows" from "there were a million and you saw 1,000". Fetching one extra answers the question definitively at the cost of one row, and lets <code>truncated: true</code> be reported honestly. That flag is what tells the AI to aggregate further instead of confidently summarizing a truncated result.</li>
+<li><strong><code>fetchmany(max_rows + 1)</code>.</strong> Fetch exactly the cap and you cannot distinguish "there were exactly 1,000 rows" from "there were a million and you saw 1,000". Fetching one extra answers the question definitively at the cost of one row, and lets <code>truncated: true</code> be reported honestly. That flag is what tells the AI to aggregate further instead of confidently summarizing a truncated result.</li>
 <li>Detecting the timeout by <strong>substring-matching the exception message</strong> is fragile and the code knows it — SQLite could reword "interrupted", and a genuinely different <code>OperationalError</code> containing that word would be misclassified. Python's <code>sqlite3</code> doesn't expose a distinct exception class or an error code for interruption, so there isn't a better option available. Worth a comment; it doesn't have one.</li>
 <li>The bare <code>raise</code> in the else branch re-raises the original with its traceback intact, so a real SQL error still reaches <code>server.query_sql</code> and gets reported as a SQL error rather than a timeout.</li>
 <li><code>clear_deadline</code> in <code>finally</code> runs on both paths.</li>
@@ -1153,7 +1153,7 @@ if truncated:
 <ol class="notes">
 <li><strong>The primary key is the content hash, not a path and not an autoincrement.</strong> This is the central modelling decision of the whole project. The same bytes are the same source however they're named or wherever they sit, so renaming a CSV or copying it to a second folder produces no duplicate work.</li>
 <li><code>sha256</code> duplicates <code>source_id</code> — <code>record_source</code> passes <code>source_id</code> into both. Redundant today; readable as documentation of what the opaque-looking key actually is. A reasonable person could argue either way about keeping it.</li>
-<li><code>first_seen_at</code> and <code>last_seen_at</code> both get <code>now</code> on insert, but the <code>ON CONFLICT</code> clause updates only <code>last_seen_at</code> — so first-seen genuinely means first. Standard upsert bookkeeping, correctly implemented.</li>
+<li><code>first_seen_at</code> and <code>last_seen_at</code> both get <code>now</code> on insert, but the <code>ON CONFLICT</code> clause updates only <code>last_seen_at</code> — so first-seen genuinely means first. Standard upsert bookkeeping.</li>
 <li>Every timestamp is TEXT holding an ISO-8601 string. SQLite has no date type; ISO-8601 sorts lexicographically in the same order it sorts chronologically, which makes <code>ORDER BY imported_at</code> correct for free.</li>
 </ol>
 
@@ -1180,7 +1180,7 @@ CREATE INDEX IF NOT EXISTS imports_source_idx ON imports(source_id);</code></pre
 <ol class="notes">
 <li>The composite primary key is exactly the natural key, so <code>replace_column_profiles</code> can delete-then-insert without any risk of orphans or duplicates.</li>
 <li>Two columns hold JSON as TEXT with a comment saying so. The <code>get_*</code> functions <code>json.loads</code> them on the way out and <code>replace_column_profiles</code> <code>json.dumps</code> them on the way in, so the boundary is clean and symmetric. Using SQLite's JSON1 functions would be an option; storing opaque blobs is simpler and nothing queries inside them.</li>
-<li>Note that <code>distinct_count</code> is the one nullable numeric column, and it's paired with <code>distinct_count_approximate INTEGER NOT NULL DEFAULT 0</code> — a boolean-as-integer flag saying "this is a floor, not an exact count". Encoding uncertainty next to the number rather than in a comment is the right instinct; the profiler section explains when it fires.</li>
+<li>Note that <code>distinct_count</code> is the one nullable numeric column, and it's paired with <code>distinct_count_approximate INTEGER NOT NULL DEFAULT 0</code> — a boolean-as-integer flag saying "this is a floor, not an exact count". Encoding the uncertainty next to the number keeps the two together; the profiler section explains when it fires.</li>
 </ol>
 
 <h4>Connection setup</h4>
@@ -1242,7 +1242,7 @@ except Exception:
 <h2><span class="num">MODULE 7</span><code>importer.py</code></h2>
 <p class="deps"><b>imports:</b> <code>.catalog</code>, <code>.config</code>, <code>.database</code>, <code>.security</code> &nbsp;·&nbsp; <b>job:</b> CSV to SQLite in one pass, bounded memory</p>
 
-<p>The largest module after the server, and the one with the most going on per line. Two ideas dominate: <strong>one pass over the file does everything</strong>, and <strong>identity is the content hash</strong>.</p>
+<p>The largest module after the server. Two ideas dominate: <strong>one pass over the file does everything</strong>, and <strong>identity is the content hash</strong>.</p>
 
 <pre><code>csv.field_size_limit(10 * 1024 * 1024)</code></pre>
 
@@ -1271,7 +1271,7 @@ except Exception:
         self.bytes_read += len(chunk)
         return len(chunk)</code></pre>
 
-<p>Nineteen lines that save an entire pass over the file. If you take one implementation technique away from this codebase, take this one.</p>
+<p>Nineteen lines that save an entire pass over the file.</p>
 
 <ol class="notes">
 <li>The naive design reads the file twice: once to hash, once to parse. On a 4 GB CSV that's an extra 4 GB of I/O. This class makes hashing a side effect of the read the parser is doing anyway.</li>
@@ -1330,7 +1330,7 @@ except Exception:
 <ol class="notes">
 <li><code>DEFAULT_ENCODING = "utf-8-sig"</code> strips a UTF-8 byte-order mark if present. Excel writes one; without this the first column header would be <code>﻿Order Date</code> and every subsequent lookup by that name would fail in a way that looks like magic.</li>
 <li><code>errors="replace"</code> means a byte sequence that isn't valid UTF-8 becomes <code>U+FFFD</code> rather than raising. A single bad byte 3 GB into a file should not abort a ten-minute import. The damage is confined to one cell and remains visible as a replacement character.</li>
-<li><strong><code>newline=""</code> is mandatory, not optional.</strong> The <code>csv</code> module documentation is explicit: without it, universal-newline translation converts <code>\r\n</code> to <code>\n</code> before <code>csv</code> sees it, which corrupts any field containing a quoted embedded newline. This is a real, silent data-corruption bug and it's one line to avoid.</li>
+<li><strong><code>newline=""</code> is required, not optional.</strong> The <code>csv</code> module documentation is explicit: without it, universal-newline translation converts <code>\r\n</code> to <code>\n</code> before <code>csv</code> sees it, which corrupts any field containing a quoted embedded newline. This is a real, silent data-corruption bug and it's one line to avoid.</li>
 <li>The BOM is stripped by the decoder, <em>after</em> the hasher has already seen those bytes. So the hash covers the file exactly as it exists on disk, which is the correct definition of file identity.</li>
 </ol>
 
@@ -1377,7 +1377,7 @@ source_id = hashing.hexdigest</code></pre>
 <ol class="notes">
 <li>The drain exists so the hash covers the whole file even if the CSV reader stopped short of EOF. In the current code the loop always runs to exhaustion, so this is normally a no-op — but it makes the hash's correctness independent of <code>csv.reader</code>'s internal read-ahead behaviour, which is not something you want to depend on.</li>
 <li><code>stream.buffer</code> reaches through the <code>TextIOWrapper</code> to the <code>BufferedReader</code> underneath. Reading through the text layer would decode bytes for nothing.</li>
-<li><code>hexdigest</code> is read only <em>after</em> the drain, and it's the moment the file finally has an identity. Everything before this point was done without knowing what the file is — which is exactly why the staging table exists.</li>
+<li><code>hexdigest</code> is read only <em>after</em> the drain, and that is where the file gets its identity. Everything before this point was done without knowing what the file is — which is exactly why the staging table exists.</li>
 </ol>
 
 <h4>Rows: padded, trimmed, counted</h4>
@@ -1393,7 +1393,7 @@ source_id = hashing.hexdigest</code></pre>
 <ol class="notes">
 <li>One expression handles both directions: <code>raw_row[:width]</code> trims a too-long row, and the <code>[None] * max(0, ...)</code> pads a too-short one. Exactly one of the two ever does anything.</li>
 <li>The generator yields <code>(row, malformed)</code> rather than logging or raising, pushing the policy decision up to the caller. The importer counts them and emits a warning; the sample-reading path in <code>inspect_csv</code> ignores the flag entirely. Same generator, two policies.</li>
-<li><strong>Ragged rows are imported, not rejected.</strong> This is a values decision, and it's the right one for the tool: a 2-million-row file with 12 bad rows should import, with the damage counted and surfaced in <code>warnings</code>. Aborting would make the tool useless on exactly the messy data it exists to handle.</li>
+<li><strong>Ragged rows are imported, not rejected.</strong> That's the right call for this tool: a 2-million-row file with 12 bad rows should import, with the damage counted and surfaced in <code>warnings</code>. Aborting would make the tool useless on exactly the messy data it exists to handle.</li>
 <li><code>_clean_value</code> compares against <code>null_markers</code> with <code>in</code> on a tuple — a linear scan, but the tuple has 5 entries and the constant factor beats a set for that size. It runs once per cell, so this is a genuinely hot line.</li>
 <li>Note what <code>_clean_value</code> does <em>not</em> do: it doesn't strip whitespace, doesn't parse numbers, doesn't normalize case. Only exact marker matches become NULL. Everything else is stored byte-for-byte as it appeared, which is what preserves the distinction between <em>missing</em> and <em>invalid</em> that the profiler later reports on.</li>
 </ol>
@@ -1483,7 +1483,7 @@ db_conn.execute(f"ALTER TABLE {quote(staging)} RENAME TO {quote(final_name)}")</
 <ol class="notes">
 <li><strong>The staging table exists because the hash isn't known until EOF.</strong> There is no way to check "have I already imported this content?" before reading the content. So the import happens speculatively into <code>_tmp_import_&lt;uuid&gt;</code>, and only at the end does the code learn whether that work was needed.</li>
 <li>The dedup branch has three conditions and each earns its place: <code>not force</code> (the user didn't override), <code>existing</code> (the catalog knows this hash), and <code>table_exists</code> (the table is actually still there — the catalog could be stale if someone deleted the table out of band).</li>
-<li>Even on the dedup path, <code>record_source</code> is called. That updates <code>last_seen_at</code>, <code>relative_path</code> and <code>filename</code> — so importing the same content under a new name teaches the catalog the new name without duplicating the table. Small touch, genuinely useful.</li>
+<li>Even on the dedup path, <code>record_source</code> is called. That updates <code>last_seen_at</code>, <code>relative_path</code> and <code>filename</code> — so importing the same content under a new name teaches the catalog the new name without duplicating the table.</li>
 <li>Reusing a table costs the user the full read of the file. That's unavoidable given hash-based identity, but it's why <code>inspect_csv</code> offers the cheap <code>already_imported_hint</code> based on path and size, so a client can warn before spending ten minutes.</li>
 <li><strong><code>force=True</code> reuses the <em>old</em> table name</strong>, not the preferred one — so a re-import lands where any saved SQL expects it. <code>catalog.delete_import</code> also clears the stale column profiles, which would otherwise describe data that no longer exists.</li>
 <li><code>ALTER TABLE ... RENAME TO</code> in SQLite is a metadata-only operation. It does not copy rows. This is what makes the staging approach cheap enough to be the default rather than a fallback — a 4 GB staging table is promoted in microseconds.</li>
@@ -1516,7 +1516,7 @@ db_conn.execute(f"ALTER TABLE {quote(staging)} RENAME TO {quote(final_name)}")</
 <h2><span class="num">MODULE 8</span><code>profiler.py</code></h2>
 <p class="deps"><b>imports:</b> <code>.casting</code>, <code>.config</code>, <code>.database</code> &nbsp;·&nbsp; <b>job:</b> work out what each TEXT column appears to mean</p>
 
-<p>The importer refuses to interpret anything. This module does the interpreting — and, crucially, <strong>does not act on it</strong>. The docstring is emphatic: <em>"The result is evidence handed to the AI — the stored data is never rewritten because of an inferred type."</em></p>
+<p>The importer refuses to interpret anything. This module does the interpreting, and does not act on it. The docstring says so: <em>"The result is evidence handed to the AI — the stored data is never rewritten because of an inferred type."</em></p>
 
 <p>That separation is why a column that is 99.4% integers doesn't get silently converted, losing the 0.6% that weren't. Instead the profile says "INTEGER, confidence 0.994, invalid_count 61, here are five examples" and the AI decides what to do. The evidence is richer than the conversion would have been.</p>
 
@@ -1566,13 +1566,13 @@ db_conn.execute(f"ALTER TABLE {quote(staging)} RENAME TO {quote(final_name)}")</
 
 <ol class="notes">
 <li><strong>NULL returns early.</strong> A missing value is not evidence about type, so it's counted and skipped. This is what makes <code>type_confidence</code> a ratio over <em>non-null</em> values — a column that is 90% empty and 10% clean integers is confidently INTEGER, which is correct.</li>
-<li><strong>The memoization is the performance story.</strong> Five regex/strptime attempts per cell would be brutal on 10 million rows. But CSV columns are overwhelmingly low-cardinality — a <code>country</code> column has 200 distinct values across 10 million rows — so the cache hit rate approaches 100% and the classification cost collapses to a dict lookup. This one dict is the difference between a profile taking seconds and taking minutes.</li>
+<li><strong>The memoization is what keeps this affordable.</strong> Five regex/strptime attempts per cell would be expensive on 10 million rows. But CSV columns are overwhelmingly low-cardinality — a <code>country</code> column has 200 distinct values across 10 million rows — so the cache hit rate approaches 100% and the classification cost collapses to a dict lookup. This one dict is the difference between a profile taking seconds and taking minutes.</li>
 <li>Above <code>VALUE_CACHE_LIMIT</code> the cache stops <em>growing</em> but keeps <em>serving</em>. So a high-cardinality column (an ID) degrades to recomputation rather than to unbounded memory. Never evicting means the retained 50,000 entries are the first-seen ones, not the most-frequent — a plain LRU would be better, and much more complex. Reasonable place to stop.</li>
 <li>Failure examples are captured <strong>per type</strong>, so a column can report separately why it isn't an integer and why it isn't a date. That's what <code>profile_column</code> surfaces when <code>invalid_count</code> is surprising.</li>
 <li><code>text not in self.failures[name]</code> is a linear scan of a list — O(n) — but n is capped at 20, so it's faster than maintaining a parallel set, and it keeps insertion order so the examples are the first ones encountered.</li>
 <li><code>FAIL_EXAMPLE_LIMIT = 20</code> collects more than the 5 that get reported (<code>profile_invalid_examples</code>), giving a small buffer for whichever type ends up winning.</li>
 <li><strong>The distinct counter is a floor, not an estimate.</strong> Past 50,000 it latches <code>distinct_overflow</code> and stops counting entirely — so the reported number is exactly 50,000 and the <code>distinct_count_approximate</code> flag says "at least this many". That's more honest than a HyperLogLog estimate would be, and much simpler. The flag is what stops the AI reading 50,000 as a fact.</li>
-<li><code>samples</code> is appended only when a <em>new distinct</em> value appears, so the samples show variety rather than 20 copies of the most common value. Small detail, big difference to how useful the output is.</li>
+<li><code>samples</code> is appended only when a <em>new distinct</em> value appears, so the samples show variety rather than 20 copies of the most common value.</li>
 </ol>
 
 <h4>The verdict</h4>
@@ -1677,7 +1677,7 @@ finally:
     clear_deadline(conn)</code></pre>
 
 <ol class="notes">
-<li><strong>A failed export leaves no file.</strong> Without the <code>unlink</code>, a query that dies 8 minutes in leaves a plausible-looking half-written CSV in <code>exports/</code> with no indication it's incomplete — the worst possible artifact, because someone will open it and use it.</li>
+<li><strong>A failed export leaves no file.</strong> Without the <code>unlink</code>, a query that dies 8 minutes in leaves a plausible-looking half-written CSV in <code>exports/</code> with no indication it's incomplete, which someone will open and use.</li>
 <li>The broad <code>except Exception</code> catches disk-full, permission errors, encoding errors — anything at all — and cleans up before re-raising. Cleanup is the concern here, not classification.</li>
 <li><code>missing_ok=True</code> because the failure might have occurred before the file was created.</li>
 <li>The timeout budget is <code>export_timeout_seconds</code> (600s), not the 30s interactive budget. Same mechanism, different number, for a job with a different audience.</li>
@@ -1695,7 +1695,7 @@ def referenced_tables(sql: str, known_tables: list[str]) -> list[str]:
 <ol class="notes">
 <li><code>" ".join(sql.split())</code> collapses all whitespace runs to single spaces before hashing, so the same query reformatted gets the same hash. That's what makes "have I exported this before?" answerable.</li>
 <li><code>referenced_tables</code> is explicitly <em>best-effort</em> and says so. It intersects the query's identifier tokens with the set of known tables — no parsing. Good enough for a provenance record; nothing depends on it for correctness.</li>
-<li>It reuses <code>scrub_sql</code> so a table name mentioned inside a string literal isn't counted. Nice reuse of the security helper for a non-security purpose.</li>
+<li>It reuses <code>scrub_sql</code> so a table name mentioned inside a string literal isn't counted. Reuse of the security helper for a non-security purpose.</li>
 <li>Its blind spot follows from that reuse: <code>scrub_sql</code> collapses quoted identifiers to <code>_</code>, so a table referenced as <code>"sales"</code> won't be detected. The record just under-reports; nothing breaks.</li>
 </ol>
 
@@ -1711,18 +1711,18 @@ def referenced_tables(sql: str, known_tables: list[str]) -> list[str]:
 <h2><span class="num">MODULE 10</span><code>confirm.py</code></h2>
 <p class="deps"><b>imports:</b> <code>secrets</code>, <code>threading</code>, <code>time</code>, <code>dataclasses</code> &nbsp;·&nbsp; <b>job:</b> make destruction require two calls</p>
 
-<p>The most interesting module in the codebase, because it's solving a problem most software doesn't have: <strong>the caller is a language model, and the model can be talked into things.</strong></p>
+<p>This module solves a problem most software doesn't have: <strong>the caller is a language model, and the model can be talked into things.</strong></p>
 
 <p>Ordinarily a destructive action is safe because of everything around it — a session, a form token, and above all a human who clicked a button that said Delete. Every one of those assumes the entity issuing the request is the person who wanted it. Here the caller is a model acting on instructions, and those instructions might have come from the user or from text it read inside a CSV. None of the usual guarantees survive that, so the protection has to be structural: something that cannot be satisfied by a single call, however the model was persuaded to make it.</p>
 
-<p>What makes this module unusually good is that its docstring states its own limit before you can discover it yourself:</p>
+<p>The docstring states the module's own limit before you can discover it yourself:</p>
 
 <div class="aside">
 <span class="tag">From the source</span>
 <p><em>"What this guarantees: no one call can delete anything, and the warning is always generated before a deletion is possible. What it cannot guarantee is that a human, rather than the model, typed the confirmation word — no server can see that. It makes the human step the path of least resistance and leaves an obvious trace when it is skipped."</em></p>
 </div>
 
-<p>That's the correct security posture: state the property you actually have, not the one you'd like to claim. A model could in principle fabricate <code>confirm="DELETE"</code> on the second call. It cannot fabricate the <em>first</em> call, so the warning always gets generated, and a client that skipped showing it has produced a visible anomaly in its own transcript.</p>
+<p>That states the property the design actually has rather than a stronger one. A model could in principle fabricate <code>confirm="DELETE"</code> on the second call. It cannot fabricate the <em>first</em> call, so the warning always gets generated, and a client that skipped showing it has produced a visible anomaly in its own transcript.</p>
 
 <h4>Issuing</h4>
 
@@ -1786,7 +1786,7 @@ def _purge_locked(self) -> None:
         del self._pending[token]</code></pre>
 
 <ol class="notes">
-<li>This was for a long time the <strong>only shared mutable state in the entire process</strong>, and the only place a lock appears. It now has exactly one companion — <code>QueryResultRegistry</code> in <code>results.py</code>, which was written to this same shape — and the two of them are still the whole of it. Everything else is per-call. Worth noting how much that simplifies reasoning about the rest of the code, and worth watching whether the count stays at two.</li>
+<li>This was for a long time the <strong>only shared mutable state in the entire process</strong>, and the only place a lock appears. It now has exactly one companion — <code>QueryResultRegistry</code> in <code>results.py</code>, which was written to this same shape — and those two are all of it. Everything else is per-call, which is what keeps the rest of the code easy to reason about.</li>
 <li>The lock is needed because the MCP SDK dispatches tool calls on worker threads, so two <code>delete_table</code> calls genuinely can interleave here.</li>
 <li>The <code>_locked</code> suffix is a naming convention meaning "caller must hold the lock". <code>threading.Lock</code> is not reentrant, so a method that acquired the lock itself would deadlock when called from <code>issue</code> or <code>consume</code>. The name is the entire defence against that, and it's used consistently.</li>
 <li>The list comprehension materializes the expired keys <em>before</em> deleting. Mutating a dict while iterating it raises <code>RuntimeError</code>; this is the standard idiom for avoiding that.</li>
@@ -1800,7 +1800,7 @@ def _purge_locked(self) -> None:
 <h2><span class="num">MODULE 11</span><code>results.py</code></h2>
 <p class="deps"><b>imports:</b> <code>secrets</code>, <code>threading</code>, <code>time</code>, <code>collections</code>, <code>dataclasses</code> &nbsp;·&nbsp; <b>job:</b> let a later tool name an earlier query result</p>
 
-<p>Read this one straight after <code>confirm.py</code>. It is the same shape — an in-memory registry, a lock, a dataclass, careful error strings — solving a different problem, and the places where it <em>diverges</em> from <code>confirm.py</code> are all deliberate. Holding the two side by side is the fastest way to see why each choice was made.</p>
+<p>Read this one straight after <code>confirm.py</code>. It is the same shape — an in-memory registry, a lock, a dataclass, careful error strings — solving a different problem, and the places where it <em>diverges</em> from <code>confirm.py</code> are all deliberate. Reading the two side by side shows why each choice was made.</p>
 
 <p>The problem it exists for: <code>query_sql</code> is completely stateless. It validates, opens a read-only connection, runs, returns rows, closes. Nothing survives. So when <code>visualize_data</code> wants to say <em>"chart that result"</em>, there is no "that" — no handle, no id, nothing in the catalog, because interactive query output was never persisted anywhere and persisting it would be a much larger commitment than the feature deserves.</p>
 
@@ -1818,12 +1818,12 @@ class QueryResultRef:
     row_limit: int
     created_at: float</code></pre>
 
-<p>The rows are not here, and that absence is the whole design. It is worth being clear about why, because "cache the result so you can refer to it later" is the obvious implementation and it is the wrong one.</p>
+<p>The rows are not stored, and that is deliberate. It is worth being clear about why, because "cache the result so you can refer to it later" is the obvious implementation and not the one used here.</p>
 
 <ol class="notes">
-<li><strong>The client already has the rows.</strong> They were returned by <code>query_sql</code> and are sitting in its context. Keeping a second copy server-side would mean memory growth proportional to query output, on a server whose defining discipline everywhere else is that rows do not accumulate in RAM. That would be the one place the streaming principle got quietly abandoned, and for a chart.</li>
+<li><strong>The client already has the rows.</strong> They were returned by <code>query_sql</code> and are sitting in its context. Keeping a second copy server-side would mean memory growth proportional to query output, on a server whose defining discipline everywhere else is that rows do not accumulate in RAM. That would be the one place the streaming discipline is abandoned.</li>
 <li><strong>Two copies means a staleness question</strong> that has no good answer. If the table is re-imported between the query and the visualization, which copy is right? Storing nothing to compare makes the question disappear.</li>
-<li>What is left is exactly enough to <em>validate</em> a reference and <em>re-derive</em> it: above all the SQL. <code>visualize_data</code> does not need a copy of the rows because it can run the statement again and get them — from the database, at the moment the chart is drawn. Keeping the SQL instead of the result is what makes the cache unnecessary rather than merely undesirable, and it is why the two problems above never have to be answered.</li>
+<li>What is left is exactly enough to <em>validate</em> a reference and <em>re-derive</em> it: above all the SQL. <code>visualize_data</code> does not need a copy of the rows because it can run the statement again and get them — from the database, at the moment the chart is drawn. Keeping the SQL instead of the rows is what makes the cache unnecessary, so neither problem above has to be answered.</li>
 <li><code>frozen=True</code> and <code>columns</code> as a <code>tuple</code> rather than a list — the record is immutable once made. Nothing can mutate a reference after the fact and make the brief describe a result that never existed.</li>
 </ol>
 
@@ -1846,12 +1846,12 @@ class QueryResultRef:
     return result_id</code></pre>
 
 <ol class="notes">
-<li><strong>It takes the dict <code>execute_query</code> already built</strong> rather than seven separate arguments. The recorded shape therefore cannot drift from the returned shape — they are derived from the same object in the same breath. Passing the fields individually would create a second place to update whenever the result dict changes, and that second place would eventually be wrong.</li>
-<li><code>secrets.token_hex(4)</code> is <strong>32 bits</strong>, against <code>confirm.py</code>'s 96. That is not an oversight, and the difference is the interesting part. A confirmation token is a <em>capability</em>: holding it is what authorizes destruction, so it must be unguessable. A result id authorizes nothing. Guessing one gets you a description of a query the same caller already ran — no privilege is crossed, because there is only one principal here. It is a name, not a key, and it is sized like a name.</li>
+<li><strong>It takes the dict <code>execute_query</code> already built</strong> rather than seven separate arguments. The recorded shape therefore cannot drift from the returned shape — they are derived from the same object. Passing the fields individually would create a second place to update whenever the result dict changes, and that second place would eventually be wrong.</li>
+<li><code>secrets.token_hex(4)</code> is <strong>32 bits</strong>, against <code>confirm.py</code>'s 96. The difference is deliberate. A confirmation token is a <em>capability</em>: holding it is what authorizes destruction, so it must be unguessable. A result id authorizes nothing. Guessing one gets you a description of a query the same caller already ran — no privilege is crossed, because there is only one principal here. It is a name, not a key.</li>
 <li><code>OrderedDict</code> with <code>popitem(last=False)</code> is a <strong>FIFO bound</strong>: 32 entries, oldest evicted. Not an LRU — reading a reference doesn't renew it — which is right, since a visualization happens moments after its query or not at all.</li>
-<li><strong>Capacity-bounded, not TTL-bounded</strong> — the other deliberate divergence from <code>ConfirmationRegistry</code>. A confirmation token <em>should</em> expire on the clock: it represents a human decision, and a decision made five minutes ago may no longer hold. A result reference represents a fact that doesn't decay — a query that ran, ran. Expiring it on a timer would break a long conversation for no safety benefit, so it only falls out when 32 newer queries have pushed it out.</li>
+<li><strong>Capacity-bounded, not TTL-bounded</strong> — the other deliberate divergence from <code>ConfirmationRegistry</code>. A confirmation token <em>should</em> expire on the clock: it represents a human decision, and a decision made five minutes ago may no longer hold. A result reference represents a fact that doesn't decay. Expiring it on a timer would break a long conversation for no safety benefit, so it only falls out when 32 newer queries have pushed it out.</li>
 <li><code>while</code> rather than <code>if</code> on the eviction, which is strictly redundant when entries are added one at a time, but is the correct loop if <code>_max_entries</code> ever gets lowered at runtime. Cheap insurance.</li>
-<li><code>time.time()</code>, not <code>time.monotonic()</code> — same reasoning as <code>confirm.py</code>, and worth noticing that the codebase is consistent about it. This timestamp is rendered as a human-readable UTC string in the tool response, so it needs a wall clock; <code>database.set_deadline</code> measures an interval, so it uses the monotonic one. Two different jobs, two different clocks, every time.</li>
+<li><code>time.time()</code>, not <code>time.monotonic()</code> — same reasoning as <code>confirm.py</code>, and worth noticing that the codebase is consistent about it. This timestamp is rendered as a human-readable UTC string in the tool response, so it needs a wall clock; <code>database.set_deadline</code> measures an interval, so it uses the monotonic one.</li>
 <li>The <code>.get()</code> calls with defaults are defensive against a dict that in practice always has these keys. Mild belt-and-braces; the alternative would raise <code>KeyError</code> from inside a registry, which is a confusing place to learn that <code>execute_query</code> changed.</li>
 </ol>
 
@@ -1866,7 +1866,7 @@ class QueryResultRef:
 
 <ol class="notes">
 <li>The same principle as <code>confirm.py</code>: the reader is a model that will try to fix itself, so the message names <strong>all three</strong> reasons a lookup can fail and then says what to do. "Unknown id" would send the model guessing.</li>
-<li>Volunteering the most recent id is a real judgment call, and it cuts against the tool's own strictness — it is one token away from the "just use the latest result" fallback that <code>visualize_data</code> refuses to offer. It stays on the right side of the line because the model still has to make the call with an explicit id, and the id it is handed belongs to a query that genuinely ran. It is a recovery hint, not a default.</li>
+<li>Volunteering the most recent id is a judgment call: it sits close to the "just use the latest result" fallback that <code>visualize_data</code> doesn't offer. It stays acceptable because the model still has to make the call with an explicit id, and the id it is handed belongs to a query that genuinely ran. It is a recovery hint, not a default.</li>
 <li><code>{result_id!r}</code> quotes the value, so an empty or whitespace id is visible rather than vanishing into the sentence.</li>
 <li>The missing-id case gets its own message before this one, because "you passed nothing" and "you passed something wrong" are different mistakes with different fixes.</li>
 </ol>
@@ -1874,7 +1874,7 @@ class QueryResultRef:
 <div class="aside">
 <span class="tag">The property this buys</span>
 <p>Ids are minted in <strong>exactly one place</strong>: inside <code>query_sql</code>, after validation has passed and the statement has actually executed. Nothing else calls <code>record()</code>. A query that errored or was rejected mints nothing, because the call sits below the exception handlers; <code>sample_table</code> and <code>export_query</code> return rows but no id; a profile has none.</p>
-<p>The consequence is that <code>visualize_data</code> cannot draw a chart unless a real query really ran — not by convention, but because there is no other way for the argument it requires to come into existence. It is the same style of structural guarantee as the two-step delete, and it has the same honest limit: it constrains what leaves this server, and says nothing about what a client chooses to draw on its own.</p>
+<p>The consequence is that <code>visualize_data</code> cannot draw a chart unless a real query really ran — not by convention, but because there is no other way for the argument it requires to come into existence. Like the two-step delete, the guarantee is structural, and it has the same limit: it constrains what leaves this server, and says nothing about what a client chooses to draw on its own.</p>
 </div>
 </section>
 
@@ -1883,7 +1883,7 @@ class QueryResultRef:
 <h2><span class="num">MODULE 12</span><code>charts.py</code></h2>
 <p class="deps"><b>imports:</b> <code>math</code>, <code>dataclasses</code>, <code>matplotlib</code>, <code>.casting</code> &nbsp;·&nbsp; <b>job:</b> turn a result set into a PNG, the same way every time</p>
 
-<p>The newest module, and the one that most needs its premise stated before its code. Tabulite has no opinion about what your data means; it does have opinions about what a bar chart looks like. Those are different kinds of judgement, and this module is where the second kind is allowed to live. Everything a user might reasonably want changed arrives as an argument; everything else is decided once, here, rather than improvised per chart.</p>
+<p>The newest module. Tabulite has no opinion about what your data means, but it does fix what a bar chart looks like, and this module is where those visual decisions live. Everything a user might reasonably want changed arrives as an argument; everything else is decided once, here, rather than improvised per chart.</p>
 
 <h4>No pyplot</h4>
 
@@ -1895,7 +1895,7 @@ matplotlib.rcParams.update({...})   # written once at import, never mutated</cod
 
 <ol class="notes">
 <li>Charts are built with <code>Figure(...)</code> directly rather than through <code>pyplot</code>. <code>pyplot</code> keeps a global registry of figures and a notion of "the current axes" — process-wide mutable state, on a server that can be handling more than one request at a time. The object-oriented API has no such state, so two concurrent charts cannot interleave.</li>
-<li>For the same reason <code>rcParams</code> is written exactly once, at import, and never touched again. <code>rc_context</code> would have been the natural way to scope styling to one chart, and it is a global mutation with a lock-shaped hole in it. Anything that genuinely varies per chart — every colour, every size — is set on the <code>Figure</code> instead.</li>
+<li>For the same reason <code>rcParams</code> is written exactly once, at import, and never touched again. <code>rc_context</code> would have been the natural way to scope styling to one chart, and it mutates that global state without a lock. Anything that genuinely varies per chart — every colour, every size — is set on the <code>Figure</code> instead.</li>
 <li>The font is pinned to DejaVu Sans, which ships inside matplotlib. Naming it explicitly means a chart rendered in the container and one rendered on a laptop are the same image, and no font-fallback warning is ever emitted. It also makes the determinism claim testable: the same result and the same arguments produce the same PNG, byte for byte.</li>
 </ol>
 
@@ -1927,7 +1927,7 @@ rx, ry = abs(offset[0] - origin[0]), abs(offset[1] - origin[1])</code></pre>
 
 <ol class="notes">
 <li><strong>Rounded bar ends.</strong> The spec is a 4px radius on the data end of each bar, square at the baseline. matplotlib bars are rectangles, so each one is replaced with a <code>PathPatch</code> whose far corners are rounded. <code>rx</code> and <code>ry</code> are computed separately because the two axes have different data-per-pixel scales: passing the same number of <em>pixels</em> through each makes the corner circular on screen even though it is elliptical in data space. On a stacked bar only the outermost segment gets it; the interior ones butt against their neighbours.</li>
-<li>Ordering matters and was wrong once. The rounding runs <em>after</em> the axis limits and tick labels are final, because rotating a tick label changes the axes box, which changes the data-per-pixel scale, which changes what 4px means.</li>
+<li>Ordering matters, and it was wrong in an earlier version. The rounding runs <em>after</em> the axis limits and tick labels are final, because rotating a tick label changes the axes box, which changes the data-per-pixel scale, which changes what 4px means.</li>
 <li><strong>Tick labels are measured, not estimated.</strong> The first version guessed a label's width from its character count, and produced <code>2025-012025-02</code> along the bottom of a twelve-month chart. The rewrite lays the figure out, compares the rendered bounding boxes, and rotates — then thins to every second label — until nothing overlaps, in a bounded loop. Guessing at text metrics is the kind of thing that looks right on the sample data and fails on real column names.</li>
 </ol>
 
@@ -1939,15 +1939,15 @@ rx, ry = abs(offset[0] - origin[0]), abs(offset[1] - origin[1])</code></pre>
         "Group the tail into an 'Other' bucket in SQL, or draw fewer series")</code></pre>
 
 <ol class="notes">
-<li>Eight hues, in a fixed order, each checked for colour-vision separation against both the light and the dark surface. The <em>order</em> is the mechanism, not decoration: it is what keeps neighbouring series distinguishable, so the hues are assigned by series and never cycled or re-sorted by rank.</li>
-<li>A ninth series does not get a ninth colour. A generated hue is indistinguishable from an existing one under colour-vision deficiency, so the honest options are to fold the tail into an "Other" bucket or draw fewer series — and both of those are the caller's decision, which makes this an error rather than a silent degradation. It is the same instinct as refusing an empty result: fail where the user can see it.</li>
+<li>Eight hues, in a fixed order, each checked for colour-vision separation against both the light and the dark surface. The <em>order</em> matters: it is what keeps neighbouring series distinguishable, so the hues are assigned by series and never cycled or re-sorted by rank.</li>
+<li>A ninth series does not get a ninth colour. A generated hue is indistinguishable from an existing one under colour-vision deficiency, so the honest options are to fold the tail into an "Other" bucket or draw fewer series — and both of those are the caller's decision, which makes this an error rather than a silent degradation. As with an empty result, the failure is surfaced rather than hidden.</li>
 <li>Scatter plots cap at three rather than eight. Bars and lines only ever put <em>adjacent</em> series next to each other; a scatter puts every series against every other one, and the palette's separation guarantees do not survive that. The error says which of the two situations the caller is in.</li>
 <li><code>highlight=</code> exists because "make X stand out" is a real request with a bad default answer. Given a category, the matching bars take the accent colour and the rest recede to grey — implemented by splitting the one series into two with complementary gaps, so every bar keeps its slot and only its colour changes.</li>
 </ol>
 
 <div class="aside">
 <span class="tag">The shape of the decision</span>
-<p>Every visual property in this module is either an argument or a constant. There is no third category — nothing is inferred from the data at render time, and nothing is left to a model's discretion once <code>render()</code> has been called. That is what makes "call it again with <code>width_px=900</code>" a complete answer to "can you make that bigger", and it is the whole reason the tool takes eighteen keyword arguments rather than a prompt.</p>
+<p>Every visual property in this module is either an argument or a constant. There is no third category — nothing is inferred from the data at render time, and nothing is left to a model's discretion once <code>render()</code> has been called. That is what makes "call it again with <code>width_px=900</code>" a complete answer to "can you make that bigger", and it is why the tool takes eighteen keyword arguments rather than a prompt.</p>
 </div>
 </section>
 
@@ -1956,7 +1956,7 @@ rx, ry = abs(offset[0] - origin[0]), abs(offset[1] - origin[1])</code></pre>
 <h2><span class="num">MODULE 13</span><code>server.py</code></h2>
 <p class="deps"><b>imports:</b> everything &nbsp;·&nbsp; <b>job:</b> eleven tools, one health check, and the docstrings that teach the model</p>
 
-<p>The rind. It contains no analysis logic at all — every tool is a few lines of validation, a context manager, a call into a lower module, and a dict. What it <em>does</em> contain, and what deserves the most attention, is prose: the tool docstrings are shipped to the model as the API description, and they're doing as much work as the code.</p>
+<p>The outermost layer. It contains no analysis logic at all — every tool is a few lines of validation, a context manager, a call into a lower module, and a dict. What it does contain is prose: the tool docstrings are shipped to the model as the API description, and they're doing as much work as the code.</p>
 
 <h4>Module-level state</h4>
 
@@ -1966,10 +1966,10 @@ CONFIRMATIONS = ConfirmationRegistry()
 QUERY_RESULTS = QueryResultRegistry()</code></pre>
 
 <ol class="notes">
-<li>Config is read <strong>once, at import time</strong>, so environment changes need a restart. The testing consequence is the one that bites: setting an environment variable inside a test does nothing, because <code>from_env()</code> already ran at import. Tests have to monkeypatch <code>server.CONFIG</code> directly, or build a fresh <code>Config</code> with <code>dataclasses.replace()</code>.</li>
+<li>Config is read <strong>once, at import time</strong>, so environment changes need a restart. The testing consequence: setting an environment variable inside a test does nothing, because <code>from_env()</code> already ran at import. Tests have to monkeypatch <code>server.CONFIG</code> directly, or build a fresh <code>Config</code> with <code>dataclasses.replace()</code>.</li>
 <li><code>CONFIRMATIONS</code> is process-global, which is what makes the two-step delete work across two separate tool calls. It also means a restart between the calls invalidates the token — see above.</li>
 <li><code>SOURCE_SUFFIXES</code> as a set gives O(1) membership in the <code>list_sources</code> loop, which may walk thousands of files.</li>
-<li><code>QUERY_RESULTS</code> is process-global for the same reason <code>CONFIRMATIONS</code> is: it has to bridge two separate tool calls. These two lines are the entire mutable state of the server, and both of them exist because MCP tool calls are independent events with nothing threaded between them. When you find yourself needing a third, that is the moment to ask whether the client should be holding it instead.</li>
+<li><code>QUERY_RESULTS</code> is process-global for the same reason <code>CONFIRMATIONS</code> is: it has to bridge two separate tool calls. These two lines are the entire mutable state of the server, and both of them exist because MCP tool calls are independent events with nothing threaded between them.</li>
 </ol>
 
 <h4>The instructions block</h4>
@@ -1995,15 +1995,15 @@ title, legend or labels changed, call visualize_data again with the argument
 that controls it, so the chart stays tied to the data.
 ..."""</code></pre>
 
-<p>This string is sent to the model during the MCP handshake, before any tool is called. It is, functionally, the system prompt for this server — and it's written the way good documentation is written, not the way prompts usually are.</p>
+<p>This string is sent to the model during the MCP handshake, before any tool is called. It is, functionally, the system prompt for this server.</p>
 
 <ol class="notes">
 <li>It leads with the <strong>happy path as a sequence</strong>. A model that reads only the first two lines still knows the right order to call things in.</li>
 <li>The <code>CAST</code> warning is here rather than only in <code>query_sql</code>'s docstring, because by the time a model is writing SQL it may not re-read the tool description. This is the one thing that most needs to land early.</li>
 <li><em>"Check denominators with COUNT(TRY_REAL(col)) against COUNT(*)"</em> teaches a specific, copyable technique. Compare to a vaguer "be careful with nulls" — this one changes what gets written.</li>
 <li><em>"Aggregate inside SQLite rather than pulling raw rows"</em> states the intended usage pattern up front, which is more effective than only enforcing it with a cap and an error afterwards.</li>
-<li>The <code>"""\</code> opening escapes the first newline so the string starts at the first real character. Small, and correct.</li>
-<li>The visualization paragraph is doing something different from the rest of the block, and it is the only place in the server where a limit is drawn around what the <em>user</em> may ask for — so watch how carefully it isn't. It constrains one thing: what may be <strong>presented as this project's data</strong>. A user asking their assistant to sketch a diagram or chart figures they typed in themselves is explicitly left alone. An earlier draft of this paragraph said "never chart numbers you remember or invent" full stop, which would have had a CSV server issuing rules about the user's own sketches. The narrower rule is the one that survives contact with a real conversation, and the distinction it encodes — misrepresentation, not rendering — is worth stealing.</li>
+<li>The <code>"""\</code> opening escapes the first newline so the string starts at the first real character.</li>
+<li>The visualization paragraph is the only place in the server that limits what the <em>user</em> may ask for, and the limit is drawn narrowly. It constrains one thing: what may be <strong>presented as this project's data</strong>. A user asking their assistant to sketch a diagram or chart figures they typed in themselves is explicitly left alone. An earlier draft said "never chart numbers you remember or invent" full stop, which would have had a CSV server issuing rules about the user's own sketches. The distinction the narrower rule encodes is misrepresentation, not rendering.</li>
 </ol>
 
 <h4>Connection plumbing</h4>
@@ -2038,9 +2038,9 @@ def _writable() -> Iterator[tuple[sqlite3.Connection, sqlite3.Connection]]:
     return ToolError(str(exc))</code></pre>
 
 <ol class="notes">
-<li>This is the single most important line of error-handling policy in the file. The MCP SDK deliberately masks arbitrary exceptions — leaking a stack trace to a client is a disclosure risk. <code>ToolError</code> is the sanctioned channel for a message that <em>should</em> reach the caller.</li>
+<li>This is the error-handling policy for the whole file. The MCP SDK deliberately masks arbitrary exceptions — leaking a stack trace to a client is a disclosure risk. <code>ToolError</code> is the sanctioned channel for a message that <em>should</em> reach the caller.</li>
 <li>Which is why the careful error strings in <code>security.py</code> and <code>confirm.py</code> matter at all: they only reach the model because every anticipated failure goes through here.</li>
-<li>It <em>returns</em> rather than raises, so call sites read <code>raise _fail(exc) from exc</code>. The <code>from exc</code> preserves the chain for the server's own logs while the model sees only the message. Both audiences served.</li>
+<li>It <em>returns</em> rather than raises, so call sites read <code>raise _fail(exc) from exc</code>. The <code>from exc</code> preserves the chain for the server's own logs while the model sees only the message.</li>
 <li>The distinction being enforced is <strong>anticipated vs unanticipated</strong>. <code>SecurityError</code>, <code>ConfirmationError</code> and <code>QueryTimeout</code> are things a caller can act on. A <code>KeyError</code> is a bug, and the model can't fix it — masking it is right.</li>
 </ol>
 
@@ -2057,7 +2057,7 @@ def _writable() -> Iterator[tuple[sqlite3.Connection, sqlite3.Connection]]:
 <tr><td><code>profile_table</code></td><td>writable</td><td>Writable because a cache miss recomputes and writes profiles. <code>refresh=True</code> forces it.</td></tr>
 <tr><td><code>profile_column</code></td><td>writable</td><td>The drill-down: returns the full record including <code>invalid_examples</code>. Same lazy-compute path.</td></tr>
 <tr><td><code>sample_table</code></td><td>read-only</td><td><code>limit</code> validated <code>&gt;= 1</code>, clamped to <code>max_sample_rows</code>, then <code>int()</code>-cast before interpolation. Belt and braces on an already-validated integer.</td></tr>
-<tr><td><code>query_sql</code></td><td>read-only</td><td>The main event. Validate, execute, cap, report truncation — then record the result's shape and return a <code>query_result_id</code> with it. That last line is the only writer the results registry has.</td></tr>
+<tr><td><code>query_sql</code></td><td>read-only</td><td>The core tool. Validate, execute, cap, report truncation — then record the result's shape and return a <code>query_result_id</code> with it. That last line is the only writer the results registry has.</td></tr>
 <tr><td><code>export_query</code></td><td>read-only</td><td>Same validation, no cap, streams to disk.</td></tr>
 <tr><td><code>visualize_data</code></td><td>read-only</td><td>Looks up the reference, <em>re-runs its SQL</em>, renders a PNG. The only tool that both reads the database and writes a file — see below.</td></tr>
 <tr><td><code>delete_table</code></td><td>writable</td><td>The only destructive tool, and the only one with <code>ToolAnnotations</code>.</td></tr>
@@ -2083,7 +2083,7 @@ if not profiles:
 
 <h4><code>visualize_data</code> — where the rows come from</h4>
 
-<p>This tool was once the clearest illustration in the codebase of <em>the docstring is the API</em>: a lookup, a guard, and a dict of English telling the client to go and draw something. It now renders the chart itself, and the interesting part is which of the old arguments survived that change and which did not.</p>
+<p>This tool was once the clearest illustration in the codebase of <em>the docstring is the API</em>: a lookup, a guard, and a dict of English telling the client to go and draw something. It now renders the chart itself, and it is worth noting which of the old arguments survived that change.</p>
 
 <pre><code>ref = QUERY_RESULTS.get(query_result_id)          # raises -&gt; _fail -&gt; ToolError
 if ref.returned_rows == 0:
@@ -2100,10 +2100,10 @@ return CallToolResult(
     structured_content=payload)</code></pre>
 
 <ol class="notes">
-<li><strong>The rows are re-read, not passed in.</strong> This is the load-bearing line. There is no <code>rows</code> or <code>values</code> parameter, so a chart of numbers a model remembered, inferred from a profile, or read out of a <code>sample_table</code> peek is not <em>refused</em> — it is unreachable, because there is nowhere to put them. The earlier design achieved the same end with a paragraph of guidance asking the client to please use only the rows it already had. Re-running the statement turns that request into a property of the type signature.</li>
-<li>It costs an extra query. That is the honest price, and it is small: the statement was cheap enough to run interactively a moment ago, it is capped the same way, and it runs against the same read-only connection with the same authorizer. What it buys is that the picture cannot disagree with the database — including the case where the table was dropped in between, which now surfaces as a specific error rather than as a stale chart.</li>
+<li><strong>The rows are re-read, not passed in.</strong> There is no <code>rows</code> or <code>values</code> parameter, so a chart of numbers a model remembered, inferred from a profile, or read out of a <code>sample_table</code> peek is not <em>refused</em> — it is unreachable, because there is nowhere to put them. The earlier design achieved the same end with a paragraph of guidance asking the client to please use only the rows it already had. Re-running the statement turns that request into a property of the type signature.</li>
+<li>It costs an extra query. That price is small: the statement was cheap enough to run interactively a moment ago, it is capped the same way, and it runs against the same read-only connection with the same authorizer. What it buys is that the picture cannot disagree with the database — including the case where the table was dropped in between, which now surfaces as a specific error rather than as a stale chart.</li>
 <li><code>validate_read_only_sql</code> runs <em>again</em> on a statement that already passed it once. Redundant by construction, kept anyway: the registry is in-memory state and the connection is a fresh one, so the validation belongs next to the execution rather than in the history of how the string got there.</li>
-<li><strong>The parameters came back, and that is a reversal worth naming.</strong> The previous version of this page argued that <code>visualize_data(query_result_id, intent=None)</code> was the whole design and that "the absent parameters are the feature" — that <code>x</code>, <code>y</code>, <code>chart_type</code> and <code>color</code> would be the server making decisions it could not make well. The reasoning was sound about <em>choosing</em>; it was wrong about <em>controlling</em>. Choosing axes is still the model's job, and it still does it by passing arguments informed by the user's question. What changed is what happens next: when the user says "make it wider" or "make that bar orange", there is now a matplotlib keyword for it. Without one, the only way to honour the request is to generate a fresh picture, and a picture generated to look like a chart is not tied to anything.</li>
+<li><strong>The parameters came back</strong>, reversing an earlier decision. The previous version of this page argued that <code>visualize_data(query_result_id, intent=None)</code> was the whole design and that "the absent parameters are the feature" — that <code>x</code>, <code>y</code>, <code>chart_type</code> and <code>color</code> would be the server making decisions it could not make well. The reasoning was sound about <em>choosing</em>; it was wrong about <em>controlling</em>. Choosing axes is still the model's job, and it still does it by passing arguments informed by the user's question. What changed is what happens next: when the user says "make it wider" or "make that bar orange", there is now a matplotlib keyword for it. Without one, the only way to honour the request is to generate a fresh picture, and a picture generated to look like a chart is not tied to anything.</li>
 <li>That is the same trade the project makes everywhere else, one level up. Tabulite does not answer questions about your data; it hands the model <code>sqlite3</code> and lets it write SQL. It does not draw charts by imagination either; it hands the model matplotlib and lets it set parameters. In both cases the mature, deterministic library does the work and the model supplies the intent.</li>
 <li><code>intent</code> survived unchanged, and still changes nothing in the output. It exists so the goal travels with the reference rather than being reconstructed from context.</li>
 <li><strong>The empty-result guard</strong> is still the one piece of pure policy, and it now fires twice: once against the recorded row count, and again if the re-run comes back empty. A zero-row result is precisely the position in which a model is most likely to produce plausible-looking numbers — it has been told to draw something and given nothing to draw. Refusing outright is the fail-closed direction.</li>
@@ -2130,13 +2130,13 @@ return CallToolResult(
 
 <ol class="notes">
 <li><strong>All the facts are gathered before the branch</strong>, so the step-1 warning describes exactly what step 2 will destroy. If the counts were gathered separately in each branch they could drift, and the warning would be a guess.</li>
-<li><strong><code>source_present</code> is the most thoughtful line in the file.</strong> It checks whether the original CSV is still on disk, and the warning text changes completely depending on the answer: if present, "the table could be rebuilt with import_source() afterwards"; if not, "this table CANNOT be re-imported. Deleting it destroys the only copy of this data held by this server." Same operation, two genuinely different levels of consequence — and the tool tells the truth about which one you're in.</li>
+<li><strong><code>source_present</code> changes what the warning says.</strong> It checks whether the original CSV is still on disk, and the warning text changes completely depending on the answer: if present, "the table could be rebuilt with import_source() afterwards"; if not, "this table CANNOT be re-imported. Deleting it destroys the only copy of this data held by this server." Same operation, two different levels of consequence, and the warning says which one applies.</li>
 <li>The gate is <code>confirm is None and confirmation_token is None</code>, so <em>either</em> argument routes to step 2. A caller passing only a token gets "you must type DELETE"; a caller passing only the word gets "missing confirmation_token". Both are informative, neither is a silent success.</li>
 <li>The step-1 response includes <code>next_step</code> with the literal call to make, token interpolated via <code>{token!r}</code>. It's a script for the caller. Combined with <code>will_delete</code> and <code>will_keep</code>, the response is designed to be shown to a human, not just parsed.</li>
 <li><code>ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False)</code> is MCP protocol metadata — machine-readable "this is dangerous", which a client can use to require its own confirmation UI. Belt and braces alongside the token dance.</li>
 <li>The deletion order is: drop table → delete import → maybe delete source → vacuum. Facts are captured first, so the response can report row counts for a table that no longer exists.</li>
-<li><code>size_after</code> is computed <strong>after</strong> the <code>with</code> block exits and the connection closes, with a comment saying why: <em>"so it matches the file on disk"</em>. A size read with the connection open can reflect pages not yet released. This kind of care about a cosmetic number is a good tell for the rest of the codebase.</li>
-<li><code>rows</code>, <code>columns</code> and <code>profiles</code> are still in scope after the <code>with</code> — Python has function scope, not block scope. Used deliberately here, and it works.</li>
+<li><code>size_after</code> is computed <strong>after</strong> the <code>with</code> block exits and the connection closes, with a comment saying why: <em>"so it matches the file on disk"</em>. A size read with the connection open can reflect pages not yet released.</li>
+<li><code>rows</code>, <code>columns</code> and <code>profiles</code> are still in scope after the <code>with</code> — Python has function scope, not block scope. Used deliberately here.</li>
 </ol>
 
 <h4>Transport</h4>
@@ -2212,10 +2212,10 @@ async def health(request: Request) -> JSONResponse:
   </div>
 </div>
 
-<p>The numbering is intentional: the string check is L0, in front of everything, and it's the layer the design explicitly refuses to rely on. That ordering is the mark of someone who has thought about this properly — every keyword denylist is incomplete, so the correct move is to build the real defence somewhere else and then keep the denylist anyway, for error quality.</p>
+<p>The numbering is intentional: the string check is L0, in front of everything, and it's the layer the design explicitly refuses to rely on. Every keyword denylist is incomplete, so the real defence is built elsewhere and the denylist is kept anyway, for error quality.</p>
 
 <div class="aside">
-<span class="tag">The generalizable lesson</span>
+<span class="tag">The general pattern</span>
 <p>When you must accept untrusted input in a language you can't fully parse, don't try to validate the text. Find the layer that has already parsed it, and constrain <em>that</em>. The scrubber can be defeated by a SQL construct nobody thought of; the authorizer cannot, because SQLite tells it what the statement means rather than what it says.</p>
 </div>
 </section>
@@ -2243,7 +2243,7 @@ async def health(request: Request) -> JSONResponse:
 
 <p>The discipline is consistent: <strong><code>fetchall()</code> appears nowhere in the codebase on a user-sized result.</strong> Every path that could touch a large result set uses <code>fetchmany</code> in a loop, usually through the shared <code>iter_batches</code> helper. One <code>fetchall()</code> in the profiler's scan would quietly undo all of it.</p>
 
-<p>The one place the discipline slips is the profiler's per-column caches, which are bounded per column rather than globally — see the note in that section. It's the exception that shows how deliberate the rest is.</p>
+<p>The one place the discipline slips is the profiler's per-column caches, which are bounded per column rather than globally — see the note in that section.</p>
 </section>
 
 <!-- ============================================================ -->
@@ -2312,8 +2312,8 @@ async def health(request: Request) -> JSONResponse:
 <p><code>CREATE TABLE IF NOT EXISTS</code> can add tables but cannot alter them. The first schema change ships as a runtime error for existing users. <code>PRAGMA user_version</code> plus a migration list, before that happens.</p>
 
 <h3>One limit lives outside <code>config.py</code></h3>
-<p>Every other tunable in the codebase is a <code>Config</code> field with an environment override — row caps, timeouts, batch size, sample sizes. The results registry's bound is <code>DEFAULT_MAX_ENTRIES = 32</code>, a module constant in <code>results.py</code>, reachable only by constructing the registry differently in a test. It is very unlikely anyone needs to tune it, but it is the first limit in the project that doesn't follow the project's own rule, and that is how a convention starts eroding. One field on <code>Config</code> would settle it.</p>
-<p>Related, and smaller: the registry retains each result's SQL text verbatim, thirty-two of them, with no length bound. A conversation full of very large generated queries would hold onto more string than anyone intends. Bounded by 32 and by how much SQL a model writes, so not a practical concern — just the only unbounded retention left in a codebase that is otherwise meticulous about it.</p>
+<p>Every other tunable in the codebase is a <code>Config</code> field with an environment override — row caps, timeouts, batch size, sample sizes. The results registry's bound is <code>DEFAULT_MAX_ENTRIES = 32</code>, a module constant in <code>results.py</code>, reachable only by constructing the registry differently in a test. It is very unlikely anyone needs to tune it, but it is the first limit in the project that doesn't follow the project's own rule. One field on <code>Config</code> would settle it.</p>
+<p>Related, and smaller: the registry retains each result's SQL text verbatim, thirty-two of them, with no length bound. A conversation full of very large generated queries would hold onto more string than anyone intends. Bounded by 32 and by how much SQL a model writes, so not a practical concern — just the only unbounded retention left in the codebase.</p>
 
 <h3>Naming</h3>
 <p><code>safe_table_name()</code> is used for column names too. <code>deterministic_table_name()</code> raises <code>SecurityError</code> for a non-security condition. Both cosmetic.</p>
