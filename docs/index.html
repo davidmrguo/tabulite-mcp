@@ -375,8 +375,6 @@ figcaption{
 
 <p>The verbs are ordered, and the last two depend on the fourth: <strong>export</strong> and <strong>visualize</strong> both act on a query result rather than on a table. You cannot chart a CSV here — you query it, and then you chart what the query returned. SQLite does the filtering and the arithmetic; matplotlib is handed the rows it produced and does nothing but draw them.</p>
 
-<p><strong>Visualize</strong> is still the odd one out, for a different reason than it used to be. It is the only verb that both reads the database and writes a file, and the only one whose output is an image rather than data. Two modules carry it: <code>results.py</code>, which makes a query result nameable at all, and <code>charts.py</code>, which is the one place in the codebase allowed to have opinions about what a bar chart should look like.</p>
-
 <p>Two rules explain most of the design decisions you'll meet:</p>
 
 <ol>
