@@ -57,13 +57,16 @@ QUERY_RESULTS = QueryResultRegistry()
 INSTRUCTIONS = """\
 A local SQLite runtime sitting next to large CSV files.
 
-Typical flow: list_sources -> import_source -> profile_table -> query_sql ->
-visualize_data when a chart would help, or export_query when the final result
-is too large for the conversation.
+Typical flow: list_sources -> import_source -> profile_table -> query_sql, and
+export_query when the final result is too large for the conversation.
 
-Always query first. SQLite does the filtering and the arithmetic; matplotlib
-only draws what a query already returned. There is no path to a chart that
-skips query_sql.
+visualize_data is not a step in that flow. A query result is already an answer:
+report the numbers. Draw a chart when the user asks for one, and otherwise at
+most offer one in a sentence and wait for the answer.
+
+When a chart is wanted, query first. SQLite does the filtering and the
+arithmetic; matplotlib only draws what a query already returned. There is no
+path to a chart that skips query_sql.
 
 CSV fields are stored as TEXT. Use the TRY_* functions in your SQL to convert
 values safely: TRY_INTEGER, TRY_REAL, TRY_DATE, TRY_DATETIME, TRY_BOOLEAN.
@@ -73,10 +76,12 @@ with COUNT(TRY_REAL(col)) against COUNT(*) when a number matters.
 
 Aggregate inside SQLite rather than pulling raw rows: query_sql is row-capped.
 
-query_sql returns a query_result_id. Pass that id to visualize_data and the
-server draws the chart with matplotlib, returns the image and saves the PNG
-under workspace/charts. Aggregate in SQL first and chart the result: reshaping
-the data is query_sql's job, drawing it is visualize_data's.
+query_sql returns a query_result_id. It is how a chart gets requested later,
+not a prompt to draw one now. When the user does ask, pass that id to
+visualize_data and the server draws the chart with matplotlib, returns the
+image and saves the PNG under workspace/charts. Aggregate in SQL first and
+chart the result: reshaping the data is query_sql's job, drawing it is
+visualize_data's.
 
 Do not write plotting code and do not generate a picture of a chart yourself.
 When the user wants the size, colours, type, title, legend or labels changed,
@@ -402,8 +407,9 @@ def query_sql(sql: str) -> dict[str, Any]:
     TRY_BOOLEAN for safe conversion. Results are capped; when `truncated` is
     true, aggregate further in SQL or use export_query() instead.
 
-    The returned query_result_id names this result. Pass it to visualize_data()
-    if the user would be better served by a chart than by a table of numbers.
+    The returned query_result_id names this result. It exists so a chart can be
+    drawn from this exact query later; it is not a reason to draw one. Answer
+    with the numbers unless the user asked to see them as a picture.
     """
     try:
         statement = validate_read_only_sql(sql)
@@ -482,6 +488,13 @@ def visualize_data(
     file_name: str | None = None,
 ) -> CallToolResult:
     """Draw a chart of a query result with matplotlib, and return the image.
+
+    ONLY WHEN THE USER ASKS. Call this when the user asks for a chart, a graph,
+    a plot, or to see something drawn — or when they have accepted an offer of
+    one. Finishing a query is not a reason to call it: a table of numbers is a
+    complete answer, and an unrequested chart is noise the user then has to
+    read past. If a picture would genuinely show something the numbers do not,
+    say so in a sentence and let the user decide.
 
     QUERY FIRST, THEN CHART. This tool visualizes a result that query_sql()
     already produced, so the order is always: write the SQL that shapes the
