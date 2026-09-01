@@ -132,12 +132,12 @@ def test_the_image_comes_back_for_the_client_to_show(project):
     assert images[0].data  # base64 of the file on disk
 
 
-def test_charts_are_600px_wide_by_default(project):
+def test_charts_are_1200px_wide_by_default(project):
     payload = server_module.visualize_data(revenue_by_channel(project))
     chart = chart_of(payload)
 
-    assert chart["width_px"] == 600
-    assert png_size(Path(chart["absolute_path"])) == (600, chart["height_px"])
+    assert chart["width_px"] == 1200
+    assert png_size(Path(chart["absolute_path"])) == (1200, chart["height_px"])
 
 
 def test_height_follows_the_chart_type(project):
@@ -146,7 +146,7 @@ def test_height_follows_the_chart_type(project):
         kind: chart_of(server_module.visualize_data(result_id, chart_type=kind))["height_px"]
         for kind in ("bar", "line", "area", "pie")
     }
-    assert heights == {"bar": 380, "line": 360, "area": 360, "pie": 400}
+    assert heights == {"bar": 760, "line": 720, "area": 720, "pie": 800}
 
     numeric = server_module.query_sql(
         "SELECT TRY_REAL(quantity) AS quantity, TRY_REAL(revenue) AS revenue "
@@ -154,7 +154,7 @@ def test_height_follows_the_chart_type(project):
     )["query_result_id"]
     assert chart_of(
         server_module.visualize_data(numeric, chart_type="scatter")
-    )["height_px"] == 420
+    )["height_px"] == 840
 
 
 def test_a_horizontal_bar_chart_grows_with_its_rows(project, config):
