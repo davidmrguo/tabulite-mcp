@@ -26,7 +26,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from pathlib import Path as FilePath
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 import matplotlib
 
@@ -222,6 +222,60 @@ def format_number(value: float) -> str:
     return f"{value:,.4g}"
 
 
+def format_plain(value: float) -> str:
+    """Bare tick label — no comma grouping, no magnitude suffix. The right
+    default for an ordinal axis (a year, an id, a zip code) where digits are
+    read as a value's identity rather than compared by size.
+    """
+    if not math.isfinite(value):
+        return ""
+    if value == int(value):
+        return f"{int(value)}"
+    return f"{value:.4g}"
+
+
+def format_comma(value: float) -> str:
+    """Comma-grouped tick label at full precision — grouped like format_number
+    but never abbreviated to a K/M/B/T suffix, for when the exact digit count
+    matters more than a compact width.
+    """
+    if not math.isfinite(value):
+        return ""
+    if value == int(value):
+        return f"{value:,.0f}"
+    return f"{value:,.2f}".rstrip("0").rstrip(".")
+
+
+# Named axis formats a caller can request explicitly with x_format/y_format,
+# overriding the role-based default (format_number for a value axis,
+# format_plain for an ordinal one). "auto" / None keeps that default.
+AXIS_FORMATS: dict[str, Callable[[float], str]] = {
+    "plain": format_plain,
+    "comma": format_comma,
+    "compact": format_number,
+}
+
+
+def _axis_formatter(
+    requested: str | None, default: Callable[[float], str]
+) -> Callable[[float], str]:
+    """Resolve an x_format/y_format argument to a formatter function.
+
+    Resolved eagerly rather than inside the FuncFormatter closure, so a typo
+    like x_format="commas" fails the call immediately instead of surfacing
+    only when matplotlib draws a tick during savefig().
+    """
+    if requested is None or requested == "auto":
+        return default
+    try:
+        return AXIS_FORMATS[requested]
+    except KeyError:
+        raise ChartError(
+            f"format {requested!r} is not recognised; use one of "
+            f"{', '.join(sorted(AXIS_FORMATS))}, or 'auto'"
+        ) from None
+
+
 # --------------------------------------------------------------------------
 # Column selection
 # --------------------------------------------------------------------------
@@ -410,7 +464,10 @@ def _round_data_ends(fig: Figure, ax: Any, bars: Sequence[Any], vertical: bool) 
 # Chrome
 # --------------------------------------------------------------------------
 
-def _style_axes(ax: Any, theme: Theme, *, value_axis: str, grid: bool) -> None:
+def _style_axes(
+    ax: Any, theme: Theme, *, value_axis: str, grid: bool,
+    x_format: str | None = None, y_format: str | None = None,
+) -> None:
     """Apply the recessive chrome: hairline grid, one baseline, muted ticks."""
     ax.set_facecolor(theme.surface)
     ax.set_axisbelow(True)
@@ -434,7 +491,9 @@ def _style_axes(ax: Any, theme: Theme, *, value_axis: str, grid: bool) -> None:
     for text in (*ax.get_xticklabels(), *ax.get_yticklabels()):
         text.set_color(theme.muted_ink)
 
-    formatter = FuncFormatter(lambda value, _pos: format_number(value))
+    override = y_format if value_axis == "y" else x_format
+    formatter_fn = _axis_formatter(override, format_number)
+    formatter = FuncFormatter(lambda value, _pos: formatter_fn(value))
     (ax.yaxis if value_axis == "y" else ax.xaxis).set_major_formatter(formatter)
 
 
@@ -826,6 +885,8 @@ def render(
     title: str | None = None,
     x_label: str | None = None,
     y_label: str | None = None,
+    x_format: str | None = None,
+    y_format: str | None = None,
     series_labels: Sequence[str] | None = None,
     width_px: int = DEFAULT_WIDTH_PX,
     height_px: int | None = None,
@@ -980,21 +1041,26 @@ def render(
                 for label in labels
             ] if highlighted else None,
         )
-        _style_axes(ax, palette, value_axis="x" if chart_type == "barh" else "y", grid=grid)
+        _style_axes(
+            ax, palette, value_axis="x" if chart_type == "barh" else "y", grid=grid,
+            x_format=x_format, y_format=y_format,
+        )
     elif chart_type == "scatter":
         assert x_values is not None
         _draw_scatter(ax, palette, series, x_values)
-        _style_axes(ax, palette, value_axis="y", grid=grid)
+        _style_axes(ax, palette, value_axis="y", grid=grid, x_format=x_format, y_format=y_format)
         ax.grid(axis="x", color=palette.gridline, linewidth=GRID_WIDTH_PT, linestyle="-")
-        ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _p: format_number(v)))
+        scatter_x_fn = _axis_formatter(x_format, format_number)
+        ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _p: scatter_x_fn(v)))
     else:
         _draw_lines(
             fig, ax, palette, series, labels, x_values,
             area=chart_type == "area", stacked=stacked, value_labels=value_labels,
         )
-        _style_axes(ax, palette, value_axis="y", grid=grid)
+        _style_axes(ax, palette, value_axis="y", grid=grid, x_format=x_format, y_format=y_format)
         if x_values is not None:
-            ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _p: format_number(v)))
+            line_x_fn = _axis_formatter(x_format, format_plain)
+            ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _p: line_x_fn(v)))
 
     _apply_titles(ax, palette, title, x_label, y_label)
     if show_legend and chart_type != "pie":

@@ -49,7 +49,7 @@ class Config:
 
     # Charts. Width is fixed and the height follows the chart type, so a
     # chart's proportions are a property of its form rather than a guess.
-    chart_width_px: int = 600
+    chart_width_px: int = 1200
 
     # Profiling.
     profile_sample_values: int = 5
@@ -122,7 +122,7 @@ class Config:
             null_markers=markers,
             insert_batch_size=_env_int("TABULITE_BATCH_SIZE", 5_000),
             max_query_rows=_env_int("TABULITE_MAX_QUERY_ROWS", 1_000),
-            chart_width_px=_env_int("TABULITE_CHART_WIDTH", 600),
+            chart_width_px=_env_int("TABULITE_CHART_WIDTH", 1200),
             query_timeout_seconds=_env_float("TABULITE_QUERY_TIMEOUT", 30.0),
             export_timeout_seconds=_env_float("TABULITE_EXPORT_TIMEOUT", 600.0),
             host=os.environ.get("TABULITE_HOST", "0.0.0.0"),

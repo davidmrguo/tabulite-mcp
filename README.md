@@ -91,7 +91,7 @@ visualize_data(query_result_id="qr_9f3c1ab2", chart_type="bar",
                title="Revenue by channel")
 ```
 
-A 600px PNG comes back inline and lands in `workspace/charts/`. "Make it
+A 1200px PNG comes back inline and lands in `workspace/charts/`. "Make it
 horizontal and highlight email" is another call with `chart_type="barh"` and
 `highlight="email"` — not a redrawn picture.
 
@@ -307,7 +307,7 @@ client can show inline, and as a file on disk:
  "query_result_id": "qr_9f3c1ab2", "intent": "revenue trend by month",
  "chart": {"file_name": "line_20260831T161204_a3f9c1.png",
            "relative_path": "charts/line_20260831T161204_a3f9c1.png",
-           "chart_type": "line", "width_px": 600, "height_px": 360,
+           "chart_type": "line", "width_px": 1200, "height_px": 720,
            "x_column": "month", "y_columns": ["revenue"],
            "plotted_rows": 12, "skipped_values": 0},
  "source_result": {"sql": "SELECT ...", "returned_rows": 12}}
@@ -329,14 +329,14 @@ assistant calls the tool again with `width_px=`, `colors=`, `chart_type="barh"`
 or `value_labels=True`. Nothing is regenerated and nothing drifts — the same
 result and the same arguments always produce the same PNG, byte for byte. The
 knobs are `chart_type` (bar, barh, line, area, scatter, pie), `x` / `y`,
-`title`, `x_label`, `y_label`, `series_labels`, `width_px`, `height_px`,
-`theme`, `colors`, `highlight`, `legend`, `grid`, `stacked`, `value_labels` and
-`file_name`.
+`title`, `x_label`, `y_label`, `x_format`, `y_format`, `series_labels`,
+`width_px`, `height_px`, `theme`, `colors`, `highlight`, `legend`, `grid`,
+`stacked`, `value_labels` and `file_name`.
 
 Everything you *don't* pass is decided once, here, rather than improvised per
 chart:
 
-- **600px wide by default**, with the height that suits the form — a horizontal
+- **1200px wide by default**, with the height that suits the form — a horizontal
   bar chart grows with the number of bars, so its labels never crush together.
 - **A fixed eight-colour palette**, in a fixed order, checked for colour-vision
   separation against both the light and the dark surface. It is never cycled
@@ -457,7 +457,7 @@ All optional; set them in `compose.yaml`.
 | `TABULITE_QUERY_TIMEOUT` | `30` | seconds before a query is canceled |
 | `TABULITE_EXPORT_TIMEOUT` | `600` | seconds before an export is canceled |
 | `TABULITE_BATCH_SIZE` | `5000` | rows per `executemany()` during import |
-| `TABULITE_CHART_WIDTH` | `600` | default chart width in pixels |
+| `TABULITE_CHART_WIDTH` | `1200` | default chart width in pixels |
 | `TABULITE_HOST` / `TABULITE_PORT` | `0.0.0.0` / `8000` | bind address inside the container |
 | `TABULITE_ALLOWED_ORIGINS` | localhost origins | Origin allow-list (DNS-rebinding protection) |
 

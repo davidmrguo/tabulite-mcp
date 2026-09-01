@@ -467,6 +467,8 @@ def visualize_data(
     title: str | None = None,
     x_label: str | None = None,
     y_label: str | None = None,
+    x_format: str | None = None,
+    y_format: str | None = None,
     series_labels: str | list[str] | None = None,
     width_px: int | None = None,
     height_px: int | None = None,
@@ -532,6 +534,18 @@ def visualize_data(
       percentage on each pie slice. Off by default — a number on every point is
       usually noise.
     grid, title, x_label, y_label, series_labels: the obvious things.
+    x_format, y_format: override how that axis's numbers are printed —
+      "plain" (bare digits, no grouping: 2012, 1500), "comma" (grouped at full
+      precision: 1,500), or "compact" (grouped with a K/M/B/T suffix past
+      1000: 1.5M). Default "auto" picks compact for a magnitude axis (bar/
+      line/scatter y, or barh's x) and plain for an ordinal one (a line or
+      area chart's x-axis, e.g. a year) — the same distinction a person makes
+      by hand, so most charts need neither argument. Reach for "plain" when a
+      column that looks numeric is really an identifier (a year, a zip code,
+      an id) and a magnitude axis is defaulting to comma grouping or a
+      suffix on it; reach for "comma" on an ordinal axis when the user wants
+      grouping restored, or on a magnitude axis when a K/M/B/T suffix is
+      hiding precision the user wants to see spelled out.
     file_name: name for the PNG. One is generated if you omit it, and an
       existing file is never overwritten.
 
@@ -603,6 +617,8 @@ def visualize_data(
             title=title,
             x_label=x_label,
             y_label=y_label,
+            x_format=x_format,
+            y_format=y_format,
             series_labels=series_labels,
             width_px=width_px or CONFIG.chart_width_px,
             height_px=height_px,
