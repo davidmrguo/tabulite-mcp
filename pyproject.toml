@@ -26,7 +26,7 @@ license-files = ["LICENSE"]
 dependencies = [
     # The official Python MCP SDK, pinned: this server targets the v2 API
     # (MCPServer, host/port on run()) and does not use v1 FastMCP patterns.
-    "mcp==2.1.1",
+    "mcp==2.2.0",
     # Chart rendering. Used through the object-oriented Figure API on the Agg
     # backend, so there is no GUI toolkit and no global pyplot state; the lower
     # bound is where `layout="constrained"` and outside legend placement settle.
