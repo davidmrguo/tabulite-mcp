@@ -520,7 +520,7 @@ values, the palette's limits), the two-step delete confirmation, and tool
 invocation over a real in-process MCP session.
 
 **Stack:** Python 3.11+, the standard library's `sqlite3`, the official MCP
-Python SDK pinned at `mcp==2.1.1` (v2 API: `MCPServer`, host/port on `run()`),
+Python SDK pinned at `mcp==2.3.0` (v2 API: `MCPServer`, host/port on `run()`),
 and matplotlib for chart rendering — which brings NumPy with it, the only
 transitive weight in the tree. No pandas, no DataFrame layer, no ORM: the data
 path is recognizably ordinary Python — `sqlite3.connect()`,
