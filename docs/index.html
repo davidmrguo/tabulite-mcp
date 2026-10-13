@@ -329,7 +329,7 @@ figcaption{
   <div class="facts">
     <div>Python <b>3.11+</b></div>
     <div>sqlite3 <b>stdlib</b></div>
-    <div>mcp <b>2.1.1</b></div>
+    <div>mcp <b>2.3.0</b></div>
     <div>matplotlib <b>3.8+</b></div>
   </div>
 </header>
@@ -2160,7 +2160,7 @@ return CallToolResult(
 <li>An attacker serves you a page from <code>evil.com</code>, whose DNS record has a 1-second TTL. Your browser loads it. The record then re-resolves to <code>127.0.0.1</code>. The page's JavaScript now makes requests to <code>evil.com</code> — which the browser considers same-origin, so it doesn't apply CORS — and those requests land on <strong>your local server</strong>. The browser's origin protections have been routed around entirely.</li>
 <li>The defence is to check the <code>Host</code> and <code>Origin</code> headers at the application layer, because that's the one thing the rebind can't forge: the browser still sends <code>Host: evil.com</code>, since that's the name it was asked to fetch. It isn't in <code>allowed_hosts</code>, so the request is rejected before reaching a tool. Any server bound to a local port needs this — a hostname allowlist is not about who can route to you, it's about which names you agree to answer to.</li>
 <li><code>host="0.0.0.0"</code> binds all interfaces because the server runs inside a container and must be reachable from the host. Outside Docker, that also exposes it on the LAN — the <code>Host</code>-header allowlist limits what a LAN client can do, but binding <code>127.0.0.1</code> would be the stronger default for a bare-metal run.</li>
-<li>"Streamable HTTP" is the current MCP transport: a single endpoint handling POST for requests and optionally upgrading to SSE for streaming. The pinned <code>mcp==2.1.1</code> in <code>pyproject.toml</code>, with its comment about targeting the v2 API, is what keeps this signature stable.</li>
+<li>"Streamable HTTP" is the current MCP transport: a single endpoint handling POST for requests and optionally upgrading to SSE for streaming. The pinned <code>mcp==2.3.0</code> in <code>pyproject.toml</code>, with its comment about targeting the v2 API, is what keeps this signature stable.</li>
 </ol>
 
 <pre><code>@server.custom_route("/health", methods=["GET"])
@@ -2354,7 +2354,7 @@ async def health(request: Request) -> JSONResponse:
 
 <p><strong>Preserve ambiguity until someone can resolve it.</strong> The importer stores everything as TEXT and refuses to guess. The profiler measures and reports evidence but changes nothing. The AI — with the user's question in hand — decides. Each layer does only what it can do correctly and hands the rest upward, so no layer is ever in the position of guessing on someone else's behalf.</p>
 
-<p class="footer">Written against <code>src/tabulite_mcp</code> · Python 3.11+, the standard library's <code>sqlite3</code>, mcp 2.1.1, matplotlib 3.8+</p>
+<p class="footer">Written against <code>src/tabulite_mcp</code> · Python 3.11+, the standard library's <code>sqlite3</code>, mcp 2.3.0, matplotlib 3.8+</p>
 </section>
 
 </main>
